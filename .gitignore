@@ -1,0 +1,12 @@
+# Python virtual environment
+.venv/
+
+# Environment variables / secrets
+.env
+*.pem
+
+# Python cache
+__pycache__/
+
+# Data files
+*.parquet
