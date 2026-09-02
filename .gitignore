@@ -8,6 +8,10 @@
 # Python cache
 __pycache__/
 
-# Data files
-data/
+# Generated data files
 *.parquet
+
+# Ignore raw/processed data folders
+data/kalshi_markets/
+data/btc_prices_1s/
+data/basis_risk/samples/
