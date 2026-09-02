@@ -238,3 +238,102 @@ Verdict:
 BACKUP ONLY.
 Useful for 1-minute historical data, but poor fit for
 trade-level 60–90 day reconstruction.
+
+
+## Day 3 — Basis Risk Validation
+
+### Overall basis risk
+
+Across 100 settled KXBTC15M markets:
+
+- Mean signed basis difference: +0.737 bps
+- Median signed basis difference: +0.770 bps
+- Standard deviation: 1.191 bps
+- Minimum observed difference: -4.289 bps
+- Maximum observed difference: +3.323 bps
+- Positive differences: 74
+- Negative differences: 26
+
+The proxy tracks Kalshi's expiration value closely. The typical
+difference is less than 1 basis point, with an overall standard
+deviation of about 1.2 bps.
+
+The proxy has a small positive bias: it tends to produce a BTC
+reference value slightly above Kalshi's actual expiration value.
+However, the magnitude of this bias is small relative to BTC's
+price and appears stable enough for feature generation.
+
+### Stability and data completeness
+
+Basis error did not worsen over time.
+
+Mean signed difference by period:
+
+- Early: +1.215 bps
+- Middle: +0.636 bps
+- Late: +0.413 bps
+
+Standard deviation also decreased from 1.422 bps early to
+0.873 bps late.
+
+Exchange completeness did not materially change the error:
+
+- 3 exchanges: mean absolute error = 1.085 bps
+- 2 exchanges: mean absolute error = 1.135 bps
+
+The difference between 2-exchange and 3-exchange windows was
+small. There were only two 1-exchange observations, so there is
+not enough evidence to draw a conclusion about 1-exchange windows.
+
+### Basis-risk buffer
+
+For later model evaluation and paper trading, I will initially
+treat approximately 5 bps of BTC-reference-price difference as a
+conservative basis-risk buffer.
+
+This is not yet a final trading threshold. It is intended to
+prevent very small apparent model advantages from being treated
+as real edge when they could instead be caused by differences
+between the cross-exchange proxy and Kalshi's true reference
+value.
+
+The buffer can be revisited after more markets are collected and
+the model's probability sensitivity to BTC-price error is measured.
+
+### Decision
+
+Proceed.
+
+The cross-exchange 60-second VWAP proxy appears sufficiently
+close to Kalshi's actual BTC expiration value for use in feature
+engineering and historical model development.
+
+Across 100 settlements, the mean and median signed basis
+differences were both below 1 bps, the standard deviation was
+about 1.2 bps, and the largest observed absolute error was about
+4.3 bps.
+
+There was no evidence that basis risk worsened over time, and
+using two exchanges instead of three did not materially increase
+absolute error in this sample.
+
+I will therefore continue using the proxy, while:
+
+1. keeping the observed small positive bias documented,
+2. tracking the number of contributing exchanges,
+3. treating approximately 5 bps as an initial conservative
+   reference-price uncertainty buffer,
+4. continuing to monitor basis risk as more settlement data
+   becomes available.
+
+### Caveats
+
+The proxy is not an exact reconstruction of CF Benchmarks' BRTI.
+It is a simple volume-weighted combination of Bullish, Kraken,
+and Crypto.com trade data over the final 60 seconds.
+
+Therefore, some persistent basis difference is expected.
+
+The current validation also contains only 100 randomly sampled
+markets. The basis-risk distribution should be rechecked later
+with a larger sample.
