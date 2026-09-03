@@ -15,3 +15,4 @@ __pycache__/
 data/kalshi_markets/
 data/btc_prices_1s/
 data/basis_risk/samples/
+data/realized_vol/
