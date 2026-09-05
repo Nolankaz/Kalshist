@@ -25,9 +25,16 @@ python scripts/analyze_basis_risk.py
 
 Backfill scripts fetch and persist source data. `build_*` scripts create derived samples. `check_*` scripts perform validation checks, and `analyze_*` scripts produce research summaries or plots.
 
+## Code formatting preferences
+
+- Keep normal-length function calls and expressions on one line.
+- Only split code across multiple lines when the line is genuinely long or readability clearly improves.
+- Do not vertically expand a function call just because it has one argument.
+- Prefer compact, readable formatting over unnecessary line breaks.
+
 ## Coding Style & Naming Conventions
 
-Use standard Python style with 4-space indentation, clear snake_case names, and module-level constants in `UPPER_SNAKE_CASE`. Keep normal-length expressions and function calls on one line; split only when readability improves.
+Use standard Python style with 4-space indentation, clear snake_case names, and module-level constants in `UPPER_SNAKE_CASE`.
 
 Prefer `pathlib.Path` for filesystem paths and pandas/numpy APIs for tabular and numerical work. Keep timestamps timezone-aware in UTC, matching existing `pd.to_datetime(..., utc=True)` usage.
 
