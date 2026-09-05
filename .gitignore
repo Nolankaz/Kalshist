@@ -8,6 +8,9 @@
 # Python cache
 __pycache__/
 
+# Project plan files
+plans/
+
 # Generated data files
 *.parquet
 
