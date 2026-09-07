@@ -229,3 +229,27 @@ The wrapper computes all five windows from one maximum 24-hour proxy load and re
 - The 10-second maximum forward-fill limit is currently a chosen baseline and may be revisited later if model performance or data-quality analysis suggests a better threshold.
 - The 80% minimum coverage threshold is a baseline rule chosen after examining the 300-timestamp coverage distribution.
 - EWMA half-lives may be tuned later, but should not be changed without re-running validation.
+
+
+## Day 6 — Batch realized-volatility engine
+
+### Performance
+
+- Slow path: mean 0.025165 seconds per call, median 0.024433, and p95 0.031086. The true Day 7 workload is 17,182 timestamps, giving a projected naive runtime of 432.39 seconds, or 7.21 minutes.
+- Batch path: the representative `2026-07-15` UTC day contained 192 decision timestamps and ran in 2.506155 seconds with 28.28 MB peak Python-tracked memory. Projected across Day 7, this is 228.06 seconds, or 3.80 minutes, for a 1.90x speedup.
+
+### Equivalence and boundaries
+
+- The current reference matched the stored sample exactly. Batch validation passed all 300 rows and 20 columns: every `n_obs` and NaN mask was exact, coverage differences were within `1e-12`, and volatility/EWMA differences were within `1e-10`. The largest observed volatility/EWMA difference was `8.287814878826794e-14`.
+- For a `W`-second trailing feature at `t`, valid return labels are `ceil(t - W)` through `(t - 1ns).floor("s")`, inclusive. Both aligned and fractional 5-minute boundary tests produced exactly 300 labels. Day-boundary seam validation also passed.
+- Artifact A at `2026-07-01 12:00:00 UTC`: `realized_vol(t, "15min")` is `0.639794057375720`, while `realized_vol_features(t)["15min_vol"]` is `0.639466027995678`. Different loaded history changes left-edge forward-fill behavior, so `realized_vol_features(t)` is canonical.
+- Artifact B: 164 of 300 rows (54.67%) are affected because continuous batch history would change the wrapper's 24-hour left edge. The batch implementation therefore applies an explicit 24-hour left-edge repair.
+
+### Leakage and early data
+
+- Future-corruption tests passed for both batch and reference paths. Perturbing a bounded historical interval changed all 10 volatility/EWMA columns while leaving `n_obs` and coverage unchanged.
+- There are 192 eligible markets before full 24-hour lookback availability. At `2026-05-27 00:05:00 UTC`, `24hr_n_obs=299`, coverage is `0.003460648148148148`, both 24-hour volatility columns are NaN, and the reference comparison passed.
+
+### Production roles
+
+Use `scripts/realized_vol_batch.py` as the production path from Day 7 onward. Keep `scripts/realized_vol.py` unchanged as the reference implementation.
