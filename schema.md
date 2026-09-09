@@ -1,7 +1,9 @@
 # Data Schema
 
-All datasets use daily Parquet files. Timestamps are UTC-aware unless a field is
-explicitly documented as Unix seconds, and daily partitions use UTC dates.
+Source datasets use daily Parquet files. Timestamps are UTC-aware unless a
+field is explicitly documented as Unix seconds, and daily partitions use UTC
+dates. The derived model-ready table documented below is a single-file
+exception.
 
 ## Settled Kalshi Markets
 
@@ -115,3 +117,70 @@ Columns:
 - `price`: volume-weighted average trade price for the second.
 - `volume`: total BTC quantity traded during the second.
 - `trade_count`: number of trades in the second.
+
+## Model-Ready Market Features
+
+Path: `data/features/market_features.parquet`
+
+The table contains exactly 17,182 rows. Each row is uniquely identified by
+`(ticker, horizon_minutes)`, with one T-10 row and one T-5 row for each of 8,591
+eligible markets.
+
+Columns, in the exact order defined by the builder constants:
+
+```text
+ticker
+horizon_minutes
+open_time
+close_time
+decision_time
+close_date
+spot
+spot_age_seconds
+strike
+log_moneyness
+T_years
+hour_utc
+day_of_week
+quote_yes_bid
+quote_yes_ask
+quote_mid
+quote_spread
+quote_last_price
+quote_volume
+quote_open_interest
+quote_period_end_ts
+quote_time
+quote_age_seconds
+5min_vol
+5min_ewma_vol
+5min_n_obs
+5min_coverage
+15min_vol
+15min_ewma_vol
+15min_n_obs
+15min_coverage
+1hr_vol
+1hr_ewma_vol
+1hr_n_obs
+1hr_coverage
+4hr_vol
+4hr_ewma_vol
+4hr_n_obs
+4hr_coverage
+24hr_vol
+24hr_ewma_vol
+24hr_n_obs
+24hr_coverage
+y
+settlement_result
+settlement_value
+expiration_value
+y_from_expiration
+target_agrees
+fwd_log_return
+```
+
+Unlike the source datasets, this table deliberately uses one Parquet file
+rather than daily partitions. It is a derived, model-ready artifact intended
+to be consumed and validated as a whole.
