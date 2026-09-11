@@ -184,3 +184,25 @@ fwd_log_return
 Unlike the source datasets, this table deliberately uses one Parquet file
 rather than daily partitions. It is a derived, model-ready artifact intended
 to be consumed and validated as a whole.
+
+## Stage 0 Predictions
+
+Path: `data/models/stage0_predictions.parquet`
+
+Join key: `ticker`, `horizon_minutes`
+
+Columns:
+
+- `ticker`
+- `horizon_minutes`
+- `close_date`
+- `split`
+- `log_moneyness`
+- `T_years`
+- `y`
+- `p_<candidate>` for all 10 sigma candidates
+- `z_<candidate>` for all 10 sigma candidates
+
+The file contains exactly 17,182 rows and 27 columns. This is a deliberate
+single-file derived artifact consumed as a whole, similar to
+`market_features.parquet`.
