@@ -230,3 +230,90 @@ medians were roughly `~0.75`, while validation medians were roughly `~0.45`.
 The train period was therefore about `1.6x` more volatile.
 
 **Test-set status (2026-09-10):** The test split was not scored and no outcome-derived test statistic was computed on Day 8.
+
+## Day 9 sigma-selection rule — frozen before validation scoring
+
+This rule was written before any validation Brier, log loss, AUC, reliability curve, or other outcome-derived validation metric was computed.
+
+### Selection population
+
+Sigma selection will use the common row population separately at T-10 and T-5: only rows for which all ten Stage 0 probability candidates are non-null.
+
+Per-candidate-row metrics may be reported for coverage diagnostics, but they do not enter the sigma-selection decision.
+
+### Primary metric
+
+The primary selection metric is validation Brier score on the uncalibrated Stage 0 probabilities.
+
+Log loss and AUC will be reported as secondary diagnostics but will not determine the selected sigma.
+
+### Horizon policy
+
+One sigma estimator will be selected jointly for T-10 and T-5.
+
+The primary score is the row-count-weighted mean of the common-row T-10 and T-5 Brier scores.
+
+Both horizon-specific scores will also be reported. Any disagreement between the horizons will be recorded as a finding but will not create separate sigma estimators.
+
+### Meaningful-difference rule
+
+Candidate A is meaningfully worse than candidate B only when the paired mean difference in per-row squared error exceeds two paired standard errors on the common rows.
+
+Differences within two paired standard errors are treated as ties.
+
+The pooled comparison will use the same row-count weighting as the primary metric. Per-horizon paired comparisons will also be reported. A difference that appears meaningful only after pooling the two correlated horizons will be treated cautiously and will not override a per-horizon tie.
+
+### Tie-break 1 — volatility window length
+
+Among candidates not meaningfully worse than the numerically best candidate, prefer the shortest volatility window.
+
+### Tie-break 2 — estimator simplicity
+
+Within the selected volatility window, prefer the simple volatility estimator over its EWMA counterpart unless the simple estimator is meaningfully worse under the paired rule.
+
+### Calibration
+
+Calibration does not participate in sigma selection.
+
+Sigma is selected using uncalibrated Stage 0 probabilities only. Calibrated metrics may later be reported, but they cannot change today's sigma selection.
+
+### Train versus validation
+
+If the validation ranking disagrees with the Day 8 train ranking, validation determines the sigma selection.
+
+The disagreement will be recorded as evidence about estimator stability across regimes.
+
+### Coverage floor
+
+A sigma candidate with less than 80% coverage at either horizon is excluded from selection regardless of score.
+
+### Irreversibility
+
+Once validation metrics are computed, this rule will not be changed in response to those results. Any future alternative selection method will be treated as a separate experiment rather than a revision of this rule.
+
+## Day 9 Stage 0 Selection and Calibration Conclusions
+
+### Selected Stage 0 sigma
+
+The frozen validation/common Brier and paired 2-SE selection rule was applied without modification after validation results were observed. All ten candidates passed the 80% coverage floor, and `5min_ewma_vol` was the final winner.
+
+### Legitimate Platt calibration
+
+Only parameters with `fit_split == "train"` and `parameter_role == "legitimate_train_fit"` are legitimate production calibration:
+
+| Horizon | `a` | `b` |
+| --- | ---: | ---: |
+| T-10 | 0.009439668 | 2.161921969 |
+| T-5 | 0.052819163 | 2.500293302 |
+
+Validation-fitted parameters have `parameter_role == "validation_in_sample_ceiling"`. They are diagnostic in-sample ceilings only and must not be used as production calibration.
+
+### Evaluation conclusions
+
+- Train-fitted Platt calibration improved validation Brier and log loss at both horizons; AUC was unchanged.
+- Market `quote_mid` retained lower validation/common Brier than both raw and Platt-calibrated Stage 0.
+- Model-market disagreement is not considered tradable edge.
+- Basis risk is material enough that later trading thresholds must account for it.
+- Test outcomes remain untouched under the Day 17 one-shot rule.
+
+Detailed Day 9 results and interpretation are recorded in [`calibration_notes.md`](calibration_notes.md).
