@@ -206,3 +206,61 @@ Columns:
 The file contains exactly 17,182 rows and 27 columns. This is a deliberate
 single-file derived artifact consumed as a whole, similar to
 `market_features.parquet`.
+
+## Day 9 Stage 0 Selection and Calibration Artifacts
+
+Unless stated otherwise, these artifacts cover train and validation only. A Day 9 **common population** contains only rows where all ten Stage 0 `p_*` columns are non-null. Probability values and probability shifts are stored in raw probability units: for example, `0.04` represents 4 percentage points when interpreted as a shift. Basis quantities are stored in basis points (bps). The value `train_fitted_platt` means legitimate train-fitted calibration.
+
+### Stage 0 Sigma Selection
+
+Path: `data/models/stage0_sigma_selection.parquet`
+
+Purpose: records the frozen validation/common Brier selection, paired 2-SE comparisons, candidate summaries, and final selection. Row grain depends on `record_type`: one row per `(horizon, candidate_a, candidate_b)` paired comparison, one row per candidate summary, plus one final selection row. Important columns include `record_type`, `horizon`, `candidate_a`, `candidate_b`, `mean_difference`, `standard_error`, `two_se`, `candidate_joint_brier`, `coverage_t10`, `coverage_t5`, `eligible`, `tie_set_member`, `final_selected_sigma`, and `selection_rule`. Candidate probabilities entering selection are raw, uncalibrated Stage 0 values; the artifact uses validation common populations and contains no test results.
+
+### Validation Reliability
+
+Path: `data/models/stage0_reliability_validation.parquet`
+
+Purpose: records raw Stage 0 validation reliability by decile. The key is `(candidate, split, horizon_minutes, decile)`. Important columns are `n`, `mean_predicted`, `observed_yes_rate`, `wilson_low`, and `wilson_high`; all probability columns use raw probability units. This artifact contains the two validation common populations for the selected candidate and no train or test rows.
+
+### Platt Parameters
+
+Path: `data/models/stage0_platt_parameters.parquet`
+
+Purpose: stores fitted Platt mappings of the form `sigmoid(a + b * logit(p))`. The key is `(candidate, horizon_minutes, fit_split, parameter_role)`. Important columns include `n`, `a`, `b`, `iterations`, `final_log_likelihood`, and `final_gradient_norm`. Rows with `fit_split == "train"` and `parameter_role == "legitimate_train_fit"` are the legitimate train-fitted calibration. Rows with `parameter_role == "validation_in_sample_ceiling"` are diagnostic ceilings only and must not be used for production calibration. The fits use train or validation common populations as identified by their roles; there are no test fits.
+
+### Platt Validation Scores
+
+Path: `data/models/stage0_platt_validation_scores.parquet`
+
+Purpose: compares raw and legitimate train-fitted Platt performance on the validation common populations. The key is `(candidate, horizon_minutes)`. Important columns include `n`, `raw_brier`, `calibrated_brier`, `brier_improvement`, `raw_log_loss`, `calibrated_log_loss`, `log_loss_improvement`, `raw_auc`, and `calibrated_auc`. The `validation_fit_ceiling_*` columns are diagnostic in-sample ceiling metrics, not production-calibration results. This artifact is validation-only and contains no test scores.
+
+### Basis-Probability Sensitivity
+
+Path: `data/models/stage0_basis_probability_sensitivity.parquet`
+
+Purpose: records row-level Channel A probability sensitivity under symmetric BTC basis perturbations. The key is `(ticker, split, horizon_minutes, basis_bps, probability_version)`. Important columns include `log_moneyness`, `T_years`, `sigma`, `basis_bps`, `probability_version`, `stage0_p_raw`, `stage0_p_plus`, `stage0_p_minus`, `p_raw`, `p_plus`, `p_minus`, `shift_plus`, `shift_minus`, `max_abs_shift`, `probability_span`, and `raw_model_market_abs_gap`. `basis_bps` is in bps; probabilities and shifts are in raw probability units. `probability_version` is either `raw` or `train_fitted_platt`. `raw_model_market_abs_gap` is the raw selected Stage 0 gap retained for Part 3.1 context regardless of `probability_version`; use the model-market gap artifacts for version-specific comparisons. The artifact covers train and validation common populations only.
+
+### Basis-Probability Summary
+
+Path: `data/models/stage0_basis_probability_summary.parquet`
+
+Purpose: aggregates Channel A sensitivity distributions. The key is `(split, horizon_minutes, basis_bps, probability_version)`. Important columns include `n`, `mean_max_abs_shift`, `median_max_abs_shift`, `p75_max_abs_shift`, `p90_max_abs_shift`, `p95_max_abs_shift`, `max_max_abs_shift`, `median_probability_span`, `p95_probability_span`, and `median_raw_model_market_abs_gap`. Basis is in bps, while probability shifts, spans, and gaps use raw probability units. `median_raw_model_market_abs_gap` summarizes the raw selected Stage 0 gap and is not version-specific. Separate `raw` and `train_fitted_platt` sensitivity rows cover train and validation common populations; no test summaries are present.
+
+### Settlement Proximity Summary
+
+Path: `data/models/settlement_proximity_summary.parquet`
+
+Purpose: records Channel B settlement proximity to strike, kept separate from probability sensitivity. The key is `split`, with rows for `train`, `validation`, and `train_validation`. Important columns include `n_markets`, `median_settlement_distance_bps`, the `p25`/`p75`/`p90`/`p95` settlement-distance columns, `share_within_1_2_bps`, and `share_within_5_0_bps`. Settlement distances are in bps and shares are stored as proportions. The artifact contains no synthetic label-flip probability and no test summary.
+
+### Model-Market Gap
+
+Path: `data/models/stage0_model_market_gap.parquet`
+
+Purpose: records row-level disagreement between selected Stage 0 probabilities and market `quote_mid`. Each row is uniquely keyed by `(ticker, horizon_minutes)` and also carries `split`. Important columns are `market_probability`, `raw_model_probability`, `platt_model_probability`, `signed_gap_raw`, `abs_gap_raw`, `signed_gap_platt`, and `abs_gap_platt`. Probabilities and gaps use raw probability units; positive signed gap means the model assigns a higher YES probability than the market. The Platt values use legitimate train-fitted parameters. The artifact covers train and validation common populations only.
+
+### Model-Market Gap Summary
+
+Path: `data/models/stage0_model_market_gap_summary.parquet`
+
+Purpose: aggregates model-market disagreement by population and probability version. The key is `(split, horizon_minutes, model_version)`, where `model_version` is `raw` or `train_fitted_platt`. Important columns include `n`, `mean_abs_gap`, `median_abs_gap`, `p75_abs_gap`, `p90_abs_gap`, `p95_abs_gap`, `max_abs_gap`, `mean_signed_gap`, `median_signed_gap`, and `spearman_model_market`. Gap columns use raw probability units; Spearman correlation is unitless. The artifact covers train and validation common populations only and contains no test rows.
