@@ -1,0 +1,26 @@
+{
+  "retrieved_at_utc": "2026-09-14T20:01:44Z",
+  "timestamp_basis": "HTTP Date header of the response retrieved on 2026-09-14; server timestamp, second precision",
+  "source_url": "https://external-api.kalshi.com/trade-api/v2/series/fee_changes?series_ticker=KXBTC15M&show_historical=true",
+  "request_method": "GET",
+  "http_status": 200,
+  "response": {"series_fee_change_arr": []},
+  "endpoint_sanity_check": {
+    "retrieved_at_utc": "2026-09-14T20:01:48Z",
+    "timestamp_basis": "HTTP Date header; server timestamp, second precision",
+    "source_url": "https://external-api.kalshi.com/trade-api/v2/series/fee_changes?series_ticker=KXINX&show_historical=true",
+    "request_method": "GET",
+    "http_status": 200,
+    "response": {
+      "series_fee_change_arr": [
+        {
+          "fee_multiplier": 1,
+          "fee_type": "quadratic",
+          "id": "91b3a604-1798-4dc8-9831-5ecccf5e0758",
+          "scheduled_ts": "2026-07-03T17:00:00Z",
+          "series_ticker": "KXINX"
+        }
+      ]
+    }
+  }
+}

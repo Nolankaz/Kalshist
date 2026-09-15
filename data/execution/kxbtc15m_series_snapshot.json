@@ -1,0 +1,37 @@
+{
+  "retrieved_at_utc": "2026-09-14T20:00:49Z",
+  "timestamp_basis": "HTTP Date header of the response retrieved on 2026-09-14; server timestamp, second precision",
+  "source_url": "https://external-api.kalshi.com/trade-api/v2/series/KXBTC15M",
+  "request_method": "GET",
+  "http_status": 200,
+  "response": {
+    "series": {
+      "additional_prohibitions": [
+        "Persons who are employed by any of the Source Agencies are not permitted to trade on the Contract.",
+        "Persons who hold any material, non-public information on the Underlying are not permitted to trade on the Contract."
+      ],
+      "category": "Crypto",
+      "contract_terms_url": "https://assets.kalshi.com/contract_terms/CRYPTO.pdf",
+      "contract_url": "https://assets.kalshi.com/regulatory/product-certifications/CRYPTO.pdf",
+      "exchange_index": 2,
+      "fee_multiplier": 1,
+      "fee_type": "quadratic",
+      "frequency": "fifteen_min",
+      "last_updated_ts": "2026-09-08T19:38:35.755394Z",
+      "product_metadata": {
+        "important_info": {
+          "id": "CRYPTO15M-bulk-2026-04-20",
+          "markdown": "**Important information:** The price used to determine this market is based on CF Benchmarks' corresponding Real Time Index (RTI). At the last minute before expiration, 60 RTI prices are collected. The official and final value is the average of these prices.",
+          "message": "",
+          "title": ""
+        }
+      },
+      "settlement_sources": [
+        {"name": "CF Benchmarks", "url": "https://www.cfbenchmarks.com/"}
+      ],
+      "tags": ["BTC", "15 min", "15 Min Markets"],
+      "ticker": "KXBTC15M",
+      "title": "Bitcoin price up down"
+    }
+  }
+}

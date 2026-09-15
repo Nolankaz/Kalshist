@@ -264,3 +264,218 @@ Purpose: records row-level disagreement between selected Stage 0 probabilities a
 Path: `data/models/stage0_model_market_gap_summary.parquet`
 
 Purpose: aggregates model-market disagreement by population and probability version. The key is `(split, horizon_minutes, model_version)`, where `model_version` is `raw` or `train_fitted_platt`. Important columns include `n`, `mean_abs_gap`, `median_abs_gap`, `p75_abs_gap`, `p90_abs_gap`, `p95_abs_gap`, `max_abs_gap`, `mean_signed_gap`, `median_signed_gap`, and `spearman_model_market`. Gap columns use raw probability units; Spearman correlation is unitless. The artifact covers train and validation common populations only and contains no test rows.
+
+## Day 10 Execution Artifacts
+
+These schemas were inspected from the files on disk on 2026-09-14. The Parquet artifacts cover train and validation only. They contain no test results.
+
+### Spread and Fee Summary
+
+Path: `data/execution/spread_summary.parquet`
+
+Format and size: Parquet, 256 rows and 67 columns. This is a summary-level artifact; it contains no row-level quote records.
+
+Unique key: `(population, split, horizon_minutes, breakdown, breakdown_value)`.
+
+- `population` is `all_rows` or `day9_common`.
+- `split` is `train` or `validation`.
+- `breakdown` is `overall`, `hour_utc` or `price_bucket`.
+- `breakdown_value` is `all`, an hour label `00` through `23`, or one of `p00_10`, `p10_25`, `p25_40`, `p40_60`, `p60_75`, `p75_90`, `p90_100`.
+
+Columns, in on-disk order:
+
+```text
+population
+split
+horizon_minutes
+breakdown
+breakdown_value
+row_count
+spread_count
+spread_mean_mils
+spread_median_mils
+spread_p10_mils
+spread_p25_mils
+spread_p75_mils
+spread_p90_mils
+spread_p95_mils
+spread_p99_mils
+spread_max_mils
+spread_exactly_1_mil_share
+spread_exactly_10_mils_share
+spread_above_20_mils_share
+fee_yes_count
+fee_yes_mean_dollars
+fee_yes_median_dollars
+fee_yes_p10_dollars
+fee_yes_p25_dollars
+fee_yes_p75_dollars
+fee_yes_p90_dollars
+fee_yes_p95_dollars
+fee_yes_p99_dollars
+fee_yes_min_dollars
+fee_yes_max_dollars
+fee_no_count
+fee_no_mean_dollars
+fee_no_median_dollars
+fee_no_p10_dollars
+fee_no_p25_dollars
+fee_no_p75_dollars
+fee_no_p90_dollars
+fee_no_p95_dollars
+fee_no_p99_dollars
+fee_no_min_dollars
+fee_no_max_dollars
+mid_cost_yes_mean_probability_units
+mid_cost_yes_median_probability_units
+mid_cost_yes_p10_probability_units
+mid_cost_yes_p25_probability_units
+mid_cost_yes_p75_probability_units
+mid_cost_yes_p90_probability_units
+mid_cost_yes_p95_probability_units
+mid_cost_yes_p99_probability_units
+mid_cost_yes_min_probability_units
+mid_cost_yes_max_probability_units
+mid_cost_no_mean_probability_units
+mid_cost_no_median_probability_units
+mid_cost_no_p10_probability_units
+mid_cost_no_p25_probability_units
+mid_cost_no_p75_probability_units
+mid_cost_no_p90_probability_units
+mid_cost_no_p95_probability_units
+mid_cost_no_p99_probability_units
+mid_cost_no_min_probability_units
+mid_cost_no_max_probability_units
+bid_subcent_share
+ask_subcent_share
+stale_gt_10s_count
+stale_gt_60s_count
+stale_gt_10s_share
+stale_gt_60s_share
+```
+
+Spread statistics use mils (`0.001` probability units). Fee statistics are one-contract Direct Member net cash fees in dollars. Midpoint-cost statistics are `half_spread + fee` in raw probability units. Shares are proportions in `[0, 1]`; count fields are row counts. The artifact's purpose is to summarize historical quoted execution-cost structure, actual fee exposure, tapered/sub-cent quoting and quote staleness by population and breakdown.
+
+### Frozen Edge Threshold
+
+Path: `data/execution/edge_threshold.parquet`
+
+Format and size: Parquet, 28 rows and 24 columns. This is a summary-level parameter artifact, not a row-level signal file.
+
+Unique key: `(horizon_minutes, basis_bps, price_bucket)`, representing horizon × basis setting × price bucket. There are seven buckets for each of two horizons and two basis settings. `basis_bps = 1.2` with `threshold_role = primary` is the primary threshold; `basis_bps = 5.0` with `threshold_role = conservative_sensitivity` is non-primary.
+
+Columns, in on-disk order:
+
+```text
+horizon_minutes
+basis_bps
+threshold_role
+price_bucket
+bucket_low
+bucket_high
+basis_term
+model_error_term
+required_net_edge
+basis_validation_row_count
+ece_validation_row_count
+basis_statistic
+model_error_statistic
+probability_version
+fee_model_status
+order_size
+sigma_candidate
+bucket_merge_fired
+max_abs_decile_deviation
+platt_reproduction_max_abs_diff
+calibrated_auc
+stored_calibrated_auc
+auc_regression_abs_diff
+rule_reference
+```
+
+`basis_bps` is in basis points. `bucket_low` and `bucket_high` are `quote_mid` probability bounds. `basis_term`, `model_error_term`, `required_net_edge`, `max_abs_decile_deviation` and Platt-regression differences are raw probability units. AUC fields are unitless. Row-count and order-size fields are counts. The artifact's purpose is to store the mechanically constructed Stage 0 net-executable-edge threshold under the pre-registered additive basis-plus-ECE rule.
+
+### Threshold-Clearance Summary
+
+Path: `data/execution/threshold_clearance_summary.parquet`
+
+Format and size: Parquet, 168 rows and 28 columns. This is summary-only. No row-level candidate-signal artifact was created, and this file contains no outcomes, returns or P&L.
+
+Unique key: `(split, horizon_minutes, basis_bps, probability_version, breakdown, breakdown_value)`.
+
+- `breakdown` is `overall`, `price_bucket`, `side` or `market_summary`.
+- `breakdown_value` is `all`, one of the seven price-bucket labels, `YES`, `NO` or `cross_horizon`.
+- Cross-horizon `market_summary` rows use `horizon_minutes = 0` as the documented sentinel because they summarize T-10 and T-5 together.
+- `probability_version` is `train_fitted_platt` or diagnostic `raw`; `probability_role` identifies shipping versus diagnostic results.
+
+Columns, in on-disk order:
+
+```text
+split
+horizon_minutes
+basis_bps
+probability_version
+breakdown
+breakdown_value
+threshold_role
+probability_role
+n_common
+n_stale_excluded
+n_best_side_ties
+n_positive_gross_best_side
+n_positive_net_best_side
+n_threshold_clear
+stale_excluded_share
+positive_gross_best_side_share
+positive_net_best_side_share
+threshold_clear_share
+median_best_side_net_edge_probability_units
+p90_best_side_net_edge_probability_units
+required_net_edge_min_probability_units
+required_net_edge_max_probability_units
+n_unique_markets_threshold_clear
+n_dual_horizon_markets_threshold_clear
+n_dual_horizon_same_side
+n_dual_horizon_opposite_side
+n_dual_horizon_yes_yes
+n_dual_horizon_no_no
+```
+
+`basis_bps` is in basis points. Best-side edge and required-edge fields are raw probability units. Share fields are proportions in `[0, 1]`; `n_*` fields are counts and are null where a breakdown does not use that statistic. The artifact's purpose is to record the outcome-free candidate-signal waterfall, side and price-bucket breakdowns, clearing-edge summaries and descriptive cross-horizon market counts for both frozen basis settings and both probability versions.
+
+### KXBTC15M Series Snapshot
+
+Path: `data/execution/kxbtc15m_series_snapshot.json`
+
+Format and grain: JSON, one response snapshot document rather than a tabular row set. Its top-level keys are:
+
+```text
+http_status
+request_method
+response
+retrieved_at_utc
+source_url
+timestamp_basis
+```
+
+`response.series` contains `additional_prohibitions`, `category`, `contract_terms_url`, `contract_url`, `exchange_index`, `fee_multiplier`, `fee_type`, `frequency`, `last_updated_ts`, `product_metadata`, `settlement_sources`, `tags`, `ticker` and `title`. The stored response is HTTP 200 from `GET https://external-api.kalshi.com/trade-api/v2/series/KXBTC15M`, retrieved at `2026-09-14T20:00:49Z`; its timestamp basis is the HTTP Date header. The inspected series identifies ticker `KXBTC15M`, `fee_type = quadratic`, `fee_multiplier = 1`, fifteen-minute frequency and CF Benchmarks as the settlement source. Its purpose is to preserve the exact series metadata used in Day 10 fee research.
+
+### KXBTC15M Fee-Changes Snapshot
+
+Path: `data/execution/kxbtc15m_fee_changes_snapshot.json`
+
+Format and grain: JSON, one primary response snapshot plus one endpoint sanity-check snapshot. Its top-level keys are:
+
+```text
+endpoint_sanity_check
+http_status
+request_method
+response
+retrieved_at_utc
+source_url
+timestamp_basis
+```
+
+The primary `response` contains `series_fee_change_arr`; it is empty for KXBTC15M. `endpoint_sanity_check` contains `http_status`, `request_method`, `response`, `retrieved_at_utc`, `source_url` and `timestamp_basis`; its response contains one KXINX fee-change record with `fee_multiplier`, `fee_type`, `id`, `scheduled_ts` and `series_ticker`.
+
+The KXBTC15M response is HTTP 200 from `GET https://external-api.kalshi.com/trade-api/v2/series/fee_changes?series_ticker=KXBTC15M&show_historical=true`, retrieved at `2026-09-14T20:01:44Z` using the HTTP Date header. The KXINX sanity check was retrieved at `2026-09-14T20:01:48Z`. Its purpose is to preserve both the empty KXBTC15M series fee-change response and evidence that the endpoint returned a known record for another series; an empty array is not proof that no global, event-level or account-route historical change occurred.

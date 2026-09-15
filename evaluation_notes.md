@@ -317,3 +317,107 @@ Validation-fitted parameters have `parameter_role == "validation_in_sample_ceili
 - Test outcomes remain untouched under the Day 17 one-shot rule.
 
 Detailed Day 9 results and interpretation are recorded in [`calibration_notes.md`](calibration_notes.md).
+
+## Day 10 Edge Threshold Rule
+
+This Section 3.1 rule is pre-registered before building any threshold value, observing any threshold-clearance count, or computing any trading P&L. It leaves Section 3.2 only the mechanical work of applying the definitions below.
+
+### Threshold scale, probability, and order size
+
+The threshold applies to **net executable edge**, not model-versus-mid disagreement. A candidate on side `s` clears only when:
+
+`net_edge_s >= required_net_edge`
+
+Using the frozen Section 2.1 definitions:
+
+`net_edge_yes = p - ask - fee_yes`
+
+`net_edge_no = bid - p - fee_no`
+
+The executable bid/ask price has already crossed the spread. Do not subtract or add half-spread again when applying the threshold to these executable-edge quantities. A midpoint-scale equivalent may be reported later for interpretation, but it is not the threshold applied to a trade.
+
+The sole trading probability `p` is the train-fitted Platt calibration applied to `p_5min_ewma_vol`, separately by horizon, using only rows from `stage0_platt_parameters.parquet` with `fit_split == "train"` and `parameter_role == "legitimate_train_fit"`. Raw Stage 0 probabilities, validation-fitted in-sample ceiling parameters, other sigma candidates, and refitted parameters are prohibited. Order size is frozen at `C = 1`, consistent with execution assumption A7; no sizing rule enters this threshold.
+
+### Price buckets and sparse-cell rule
+
+Rows are bucketed by `quote_mid` using the exact seven Section 2.2 buckets:
+
+1. `[0.00, 0.10)`
+2. `[0.10, 0.25)`
+3. `[0.25, 0.40)`
+4. `[0.40, 0.60)`
+5. `[0.60, 0.75)`
+6. `[0.75, 0.90)`
+7. `[0.90, 1.00]`
+
+For each `(horizon, price_bucket)` cell, if the cell contains fewer than **50 validation common rows**, merge it with its adjacent bucket toward `0.50` before calculating the bucket statistic. Low-side buckets merge upward and high-side buckets merge downward. This rule is frozen before seeing threshold values and cannot be changed in response to them. The current minimum validation common bucket count is expected to be 54, so no merge is expected to occur; a mismatch must be treated as a regression failure rather than permission to change the buckets or cutoff.
+
+### Basis-risk term
+
+The **primary basis-error size is `basis_bps == 1.2`**, the artifact representation of the approximately `1.191 bps` basis standard deviation measured on Day 3. This is the measured typical-size proxy error and is paired with a model-error term intended to represent typical-size model error.
+
+For each horizon and price bucket, the primary `basis_term` is the **median `max_abs_shift`** from `data/models/stage0_basis_probability_sensitivity.parquet` after filtering to:
+
+- `split == "validation"`;
+- `probability_version == "train_fitted_platt"`;
+- `basis_bps == 1.2`.
+
+Join these sensitivity rows to `quote_mid` on the complete established row key `(ticker, horizon_minutes)` and apply the price buckets above. The population is the validation common population already represented by the Day 9 sensitivity artifact. Median is frozen instead of mean or p90 because the basis-sensitivity distribution is long-tailed and the primary term is intended to be a stable typical-size margin.
+
+The `basis_bps == 5.0` version uses the identical validation population, row-key join, price buckets, `train_fitted_platt` probability version, and median `max_abs_shift` statistic. It is a **conservative sensitivity, not primary**: approximately a four-standard-deviation judgmental buffer rather than the measured typical basis error. Both versions must be built and labeled separately; the choice between them may not depend on signal counts or later profitability.
+
+Validation is used for the basis term because this sensitivity calculation is outcome-free. It depends on model inputs and fitted calibration parameters, not settlement results. Validation represents the more recent regime, and Day 9 found basis sensitivity materially larger there than on train, making it the more conservative available regime for this component without consuming validation outcomes. Test rows are prohibited.
+
+### Model-error term
+
+The `model_error_term` is one number per horizon: the **10-decile expected calibration error (ECE)** of the train-fitted Platt probability on the validation common population. It is defined as:
+
+`ECE = Σ_k (n_k / n) * |observed_yes_rate_k - mean_predicted_k|`
+
+Section 3.2 must first apply the legitimate train-fitted Platt parameters to `p_5min_ewma_vol`, then pass that calibrated probability column to the existing `build_reliability_table(...)` helper in `scripts/analyze_calibration.py`. The deciles are therefore formed on the train-fitted calibrated probability, never the raw probability. The validation-fitted in-sample ceiling is prohibited.
+
+ECE is calculated across the full validation common population separately at T-10 and T-5. It is **not price-bucket-specific**. Calibration error requires validation outcomes because train is in-sample for the Platt fit, while validation is out of sample for the fitted calibrator. Subdividing ten reliability bins across seven price buckets would create thin, noisy cells and is not allowed.
+
+Ten-bin ECE on approximately 1,650 rows is biased upward by binomial sampling noise. Near `p = 0.5`, approximately 165 rows per decile imply noise on the order of `sqrt(p(1-p)/165)`, or roughly 3–4 percentage points per bin. This makes the chosen ECE margin conservative. Do not bias-correct it, and do not switch to another calibration statistic after observing its value.
+
+### Combination, primary/sensitivity outputs, and no iteration
+
+For every horizon and effective price bucket, combine the terms by simple addition:
+
+`required_net_edge = basis_term + model_error_term`
+
+Quadrature is explicitly rejected for the primary rule because it would implicitly assume independence and roughly Gaussian error structure between basis error and model calibration error. Neither assumption is established, so the conservative additive sum is frozen. The formula may not be changed because the resulting threshold appears too high or too low.
+
+Section 3.2 must mechanically produce two versions:
+
+- **Primary:** `basis_bps = 1.2`.
+- **Conservative sensitivity, not primary:** `basis_bps = 5.0`.
+
+Both versions use the same train-fitted calibrated probability, validation population, price buckets, horizon-level model-error ECE, and additive combination rule. Only the basis-error size differs.
+
+The threshold is computed once from this rule. Section 3.3's clearance count is a **result, not an optimization target**. Whether zero rows, almost no rows, or many rows clear, no component, statistic, population, bucket rule, or combination method may be altered after clearance is observed.
+
+This threshold is specific to Stage 0, `5min_ewma_vol`, and the current train-fitted Platt calibrator. Any Day 12 or later model must recompute its own basis-risk and model-error terms using the same general rule rather than inheriting Stage 0's numerical threshold.
+
+### Validation-query ledger
+
+| # | Day | Validation outcome use | Type |
+| - | --- | --- | --- |
+| 1 | 9 | σ selection across ten candidates, two horizons, common rows | Decision |
+| 2 | 9 | Raw reliability deciles with Wilson bands | Diagnostic |
+| 3 | 9 | Train-fitted Platt evaluation (Brier, log loss, AUC) against `quote_mid` and constant | Decision support — confirmed calibrator ships |
+| 4 | 9 | Validation-fitted in-sample ceiling | Diagnostic, never shipped |
+| 5 | 9 | Settlement proximity on validation using `expiration_value` | Diagnostic |
+| 6 | 10 | Model-error term: ECE of train-fitted Platt on validation | **Decision — edge threshold** |
+
+Every validation-based decision makes validation progressively more optimistic as an estimate of future test performance. This ledger exists so Day 17 can state exactly how many decisions validation informed instead of pretending validation remained untouched.
+
+Not every validation use has the same implication. Validation basis sensitivity is outcome-free and therefore is not a validation-outcome query. Validation ECE uses outcomes and belongs in the decision ledger. Raw reliability is diagnostic. The validation-fitted in-sample ceiling is diagnostic only and must never ship.
+
+No threshold component value, combined threshold, or clearance count is computed in this section. No test row or trading P&L is read. **This rule was written and saved before any Day 10 threshold table or clearance count was computed.**
+
+## Day 10 Threshold Result
+
+For Stage 0 using `5min_ewma_vol` and the train-fitted Platt calibration, validation 10-decile ECE was `0.035595749` at T-10 and `0.021091839` at T-5. With the primary `1.2 bps` basis size, required net edge ranged from `0.045622514–0.087665994` at T-10 and `0.030558963–0.107034755` at T-5. The `5.0 bps` version remains a conservative sensitivity and is explicitly non-primary. Full Day 10 execution-cost, threshold and outcome-free clearance findings are recorded in [`execution_notes.md`](execution_notes.md).
+
+**Test-set status (2026-09-14): the test split was not read on Day 10.**
