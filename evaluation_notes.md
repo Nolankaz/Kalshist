@@ -421,3 +421,85 @@ No threshold component value, combined threshold, or clearance count is computed
 For Stage 0 using `5min_ewma_vol` and the train-fitted Platt calibration, validation 10-decile ECE was `0.035595749` at T-10 and `0.021091839` at T-5. With the primary `1.2 bps` basis size, required net edge ranged from `0.045622514–0.087665994` at T-10 and `0.030558963–0.107034755` at T-5. The `5.0 bps` version remains a conservative sensitivity and is explicitly non-primary. Full Day 10 execution-cost, threshold and outcome-free clearance findings are recorded in [`execution_notes.md`](execution_notes.md).
 
 **Test-set status (2026-09-14): the test split was not read on Day 10.**
+
+## Day 11 Tier-2 Backtest Protocol
+
+This protocol is frozen before any Day 11 code loads an outcome. All results under it are **Tier 2 — quote-aware, top-of-book, size-unaware**. Historical top-of-book prices do not establish fillable size, depth, latency or realized slippage.
+
+### Scope and inherited rules
+
+Evaluate Stage 0 with the selected `5min_ewma_vol` sigma candidate and only the horizon-specific, train-fitted Platt probabilities (`fit_split == "train"`, `parameter_role == "legitimate_train_fit"`). Use the Day 9 common-row population: rows at T-10 or T-5 for which all ten Stage 0 candidate probabilities are non-null. Use the frozen `close_date` split: train is 2026-05-26 through 2026-07-19 and validation is 2026-07-20 through 2026-08-09, inclusive. Day 11 uses train and validation only. **The test split is not loaded or inspected on Day 11.**
+
+Import the already-frozen Day 10 definitions in [`execution_notes.md`](execution_notes.md) and the Day 10 Edge Threshold Rule above without modifying them: executable YES/NO prices, the Direct Member one-contract `net_cash_fee` implementation, the `quote_age_seconds > 60` stale-quote exclusion, the seven `quote_mid` price buckets, the saved `data/execution/edge_threshold.parquet` thresholds, one-contract taker entry, holding to settlement, and Kalshi settlement as contract truth. The historical fee-applicability and top-of-book fillability qualifications in the Day 10 execution-assumption register remain in force. Do not refit Platt, rebuild thresholds, or substitute midpoint prices.
+
+### Outcome-free trade selection
+
+Reuse the Day 10 row-level signal definition from `scripts/count_threshold_clearance.py`: a row clears only when `signal_eligible` is true and `best_net_edge >= required_net_edge`. Use its best-side and net-edge calculations and the saved threshold for that row's horizon, price bucket and `basis_bps`; do not reimplement the clearance rule differently.
+
+Apply the one-position-per-market rule separately for each `basis_bps` setting. For each ticker, select the clearing row with the earliest `decision_time`. If T-10 clears, enter at T-10 and suppress T-5 regardless of its side or edge. If T-10 does not clear, T-5 may become the trade if it clears. There is no adding, reversing, hedging or exit. Comparing the T-10 and T-5 edges to select the larger one would use information unavailable at T-10 and introduce lookahead bias. Freeze the selected trade lists before joining outcomes.
+
+### Payoff and per-trade accounting
+
+Kalshi `settlement_value` determines the binary payoff: `payoff = settlement_value` for YES and `payoff = 1 - settlement_value` for NO. Later, `y` may be loaded only to assert `y == settlement_value`; `expiration_value` must not determine payoff.
+
+For each one-contract trade, `entry_price` is the frozen executable price for its side, and `fee` is `net_cash_fee` from the frozen Direct Member fee implementation at that price. Calculate:
+
+```text
+gross_pnl = payoff - entry_price
+net_pnl = gross_pnl - fee
+hit = (payoff == 1) for the traded side
+capital = entry_price + fee
+```
+
+For reference lines, the model-expected net P&L of a trade is its selected-side train-fitted Platt payoff probability minus `entry_price + fee` (equivalently its `best_net_edge`). The market-fair expected net P&L uses `quote_mid` for a YES payoff probability or `1 - quote_mid` for NO, minus the same `entry_price + fee`. `surprise` is realized `net_pnl` minus model-expected net P&L. These are comparisons, not alternative trade-selection rules.
+
+### Required reports and primary result
+
+Each split × `basis_bps` setting must report trade count; distinct markets; days with trades; total close_date days represented in the frozen Day 9 common-row population; T-10 and T-5 counts; YES and NO counts; hit rate; mean entry price; break-even hit rate `mean(entry_price + fee)`; gross P&L; fees on a separate line; the fee rounding component; net P&L; net P&L per trade; mean net edge at entry; model-expected total P&L; market-fair expected total P&L; mean surprise; total capital; and net P&L / capital. Show monetary P&L and fees in dollars for one-contract trades. The fee rounding component is the frozen fee result's `rounding_adjustment - rebate`, summed across trades; it is part of `net_cash_fee`, not an additional charge. Totals and counts must reconcile to the selected trade list.
+
+The **primary result** is validation, `basis_bps = 1.2`, net P&L per trade with a day-clustered ±2 standard-error interval, clustering trades by `close_date`. For `N` trades on `D` traded days, with mean net P&L `m`, use `SE = sqrt(D / (D - 1) * sum_d (sum_{i in d}(net_pnl_i - m))^2 / N^2)`; an interval requires at least two traded days. Train is in-sample for the Platt calibrator. `basis_bps = 5.0` is sensitivity only and can never become primary based on observed P&L.
+
+### Pre-registered descriptive views
+
+Break down each trade list by horizon; side; the existing seven `quote_mid` price buckets (`p00_10`, `p10_25`, `p25_40`, `p40_60`, `p60_75`, `p75_90`, `p90_100`); and `abs(z_5min_ewma_vol)` buckets `[0, 0.25)`, `[0.25, 0.5)`, `[0.5, 1.0)`, and `[1.0, infinity)`. Use UTC decision-hour blocks `00–05`, `06–11`, `12–17`, and `18–23`. A full 24-hour table may be stored, but it is not a primary interpretation surface. Group weeks by Monday-start week based on `close_date`. Flag every cell with fewer than 30 trades as **thin** and do not interpret it.
+
+Report a descriptive-only train sensitivity excluding `close_date` 2026-05-27 through 2026-05-31, inclusive. This interval was identified before observing Day 11 outcomes. The sensitivity never replaces the full train result.
+
+For concentration, report the largest single day's share of total net P&L, the largest single Monday-start week's share of total net P&L, and the number of validation weeks whose net P&L per trade has the same sign as the validation total. Do not interpret a share with a zero total net P&L as a finite ratio.
+
+### Interpretation and no-iteration rule
+
+These categories are fixed before outcomes are joined. Let `m` be validation 1.2 bps net P&L per trade and `SE` its day-clustered standard error:
+
+- If `m + 2*SE < 0`: "Stage 0 at the frozen threshold loses money after costs on validation."
+- If the interval contains zero: "No tier-2 evidence of edge either way; not established."
+- If `m - 2*SE > 0`: "A positive tier-2 validation result, not an established edge: one three-week period, validation already used for the threshold's ECE, optimistic fills."
+
+The final interpretation must compare realized P&L per trade with both the market-fair and model-expected reference lines. None of the inherited choices or Day 11 rules above may change after outcomes are joined. Only a genuine implementation bug violating a written invariant or accounting identity may be fixed. If a fix occurs, record its before/after behavior and justification in `backtest_notes.md` and rerun both splits.
+
+### Validation-query ledger and frozen trade-list placeholders
+
+Pre-declared ledger entry **7**: **Day 11**; validation outcome use: **tier-2 P&L of the frozen Stage 0 strategy on validation**; **1.2 bps primary**, **5.0 bps sensitivity**; purpose: **Evaluation**; **no parameter chosen**. This entry records the planned query, not a result.
+
+| Frozen trade list | Trade count |
+| --- | ---: |
+| Train, 1.2 bps | 1,881 |
+| Validation, 1.2 bps | 719 |
+| Train, 5.0 bps | 277 |
+| Validation, 5.0 bps | 100 |
+
+Decision fingerprint: **f0f3fbb27ac36c8fdfeca436828fbd84f16ff614c2bc27016aaa6a1dfff08e96**. These placeholders must be filled from the actual outcome-free trade-list output in Section 1.3; no expected planning counts are inserted here.
+
+## Day 11 Backtest Result
+
+### Validation-query ledger — Day 11 addition
+
+| # | Day | Validation outcome use | Purpose | Parameter chosen |
+| --- | --- | --- | --- | --- |
+| 7 | 11 | Tier-2 P&L of the frozen Stage 0 strategy on validation; 1.2 bps primary, 5.0 bps conservative sensitivity | Evaluation | None |
+
+The outcome-free decision list had SHA-256 fingerprint `f0f3fbb27ac36c8fdfeca436828fbd84f16ff614c2bc27016aaa6a1dfff08e96`. No parameter, model, threshold, or trade rule was selected from the Day 11 outcomes.
+
+**Tier 2 — quote-aware, top-of-book, size-unaware. One contract, taker entry, held to settlement.** The primary validation 1.2-bps book had **719 trades on 21 population days and 21 traded days**. Its mean realized net P&L was **-$0.017710570236 per trade**; the pre-registered traded-day-clustered SE was **$0.012277194816**, giving the clustered **±2SE interval [-$0.042264959869, +$0.006843819396] per trade**. The interval crosses zero. The exact frozen interpretation is: **"No tier-2 evidence of edge either way; not established."** The 5.0-bps book remains sensitivity only. Full accounting, breakdowns, daily/weekly concentration, and statistical caveats are in [`backtest_notes.md`](backtest_notes.md).
+
+Test-set status (Day 11): the test split was not read.
