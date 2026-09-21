@@ -21,3 +21,6 @@ data/basis_risk/samples/
 data/realized_vol/
 data/kalshi_quotes/
 data/kalshi_quotes_live/
+data/backtest/*
+!data/backtest/plots/
+!data/backtest/plots/**

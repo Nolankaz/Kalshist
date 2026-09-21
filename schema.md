@@ -479,3 +479,46 @@ timestamp_basis
 The primary `response` contains `series_fee_change_arr`; it is empty for KXBTC15M. `endpoint_sanity_check` contains `http_status`, `request_method`, `response`, `retrieved_at_utc`, `source_url` and `timestamp_basis`; its response contains one KXINX fee-change record with `fee_multiplier`, `fee_type`, `id`, `scheduled_ts` and `series_ticker`.
 
 The KXBTC15M response is HTTP 200 from `GET https://external-api.kalshi.com/trade-api/v2/series/fee_changes?series_ticker=KXBTC15M&show_historical=true`, retrieved at `2026-09-14T20:01:44Z` using the HTTP Date header. The KXINX sanity check was retrieved at `2026-09-14T20:01:48Z`. Its purpose is to preserve both the empty KXBTC15M series fee-change response and evidence that the endpoint returned a known record for another series; an empty array is not proof that no global, event-level or account-route historical change occurred.
+
+## Day 11 Backtest Artifacts
+
+The following row counts, columns, and unique keys were checked against the on-disk Parquet files. All six artifacts cover **train and/or validation only**, never test. `basis_bps` is in basis points. Model and market probabilities are unitless values in `[0, 1]`; prices, per-contract fees, realized and expected P&L, and capital are dollars for one contract (numerically equal to corresponding probability units). `entry_price_mils` is in thousandths of a dollar. Rates, shares, and P&L/capital ratios are unitless.
+
+### Frozen Stage 0 trade decisions
+
+- **Path:** `data/backtest/stage0_trade_decisions.parquet`
+- **Rows / coverage:** 2,977 rows: train 2,158 (1.2 bps 1,881; 5.0 bps 277), validation 819 (1.2 bps 719; 5.0 bps 100).
+- **Unique key:** `(basis_bps, ticker)`; checked on disk.
+- **Outcome status and purpose:** Outcome-free, pre-settlement, fingerprinted list of the earliest threshold-clearing one-contract trade per market and basis setting. SHA-256 decision fingerprint: `f0f3fbb27ac36c8fdfeca436828fbd84f16ff614c2bc27016aaa6a1dfff08e96`.
+- **Important on-disk columns:** `split`, `close_date`, `week_start`, `horizon_minutes`, `decision_time`, `hour_utc`, `hour_block`, `side`, `quote_yes_bid`, `quote_yes_ask`, `quote_mid`, `entry_price`, `entry_price_mils`, `model_probability`, `p_side`, `z_5min_ewma_vol`, `abs_z_bucket`, `price_bucket`, `gross_edge`, `net_edge`, `required_net_edge`, `fee`, `market_fair_expected`, `other_horizon_cleared`, `other_horizon_side`, `probability_version`, `sigma_candidate`, `fee_rounding_mode`, and `order_size`. `model_fee`, `trade_fee`, `rounding_adjustment`, and `rebate` retain the fee components. No settlement, payoff, hit, surprise, or realized P&L field is present.
+
+### Frozen realized Stage 0 results
+
+- **Paths:** `data/backtest/stage0_results_train.parquet` and `data/backtest/stage0_results_validation.parquet`.
+- **Rows / coverage:** Train file 2,158 rows (1.2 bps 1,881; 5.0 bps 277), all `split = train`; validation file 819 rows (1.2 bps 719; 5.0 bps 100), all `split = validation`.
+- **Unique key:** `(basis_bps, ticker)` within each file; checked on disk.
+- **Outcome status and purpose:** Outcome-bearing, one row per frozen decision after Kalshi settlement was joined and one-contract Tier-2 accounting applied. Both files contain the 41 decision columns above, plus exactly `settlement_value`, `payoff`, `hit`, `gross_pnl`, `net_pnl`, `capital`, and `surprise`. `payoff` and `hit` are binary; `gross_pnl`, `net_pnl`, `capital`, and `surprise` are dollars per one-contract trade. No test result file was read for Day 11.
+
+### Descriptive Stage 0 summary
+
+- **Path:** `data/backtest/stage0_summary.parquet`
+- **Rows / coverage:** 200 rows: 106 train and 94 validation; both basis settings in each split.
+- **Unique key:** `(split, basis_bps, breakdown, breakdown_value)`; checked on disk.
+- **Outcome status and purpose:** Outcome-bearing descriptive aggregate of the frozen result rows, not a trade-selection table. `breakdown` includes `overall`, `horizon`, `side`, `price_bucket`, `abs_z_bucket`, `hour_block`, `hour_utc`, `week`, and train-only `train_ex_first_week`.
+- **On-disk columns:** `split`, `basis_bps`, `threshold_role`, `tier_label`, `breakdown`, `breakdown_value`, `n_trades`, `n_days`, `hit_rate`, `breakeven_hit_rate`, `gross_pnl`, `fees`, `net_pnl`, `net_pnl_per_trade`, `model_expected_per_trade`, `market_fair_per_trade`, `mean_surprise`, `total_capital`, `net_pnl_over_capital`, `thin`. `thin` is true exactly when `n_trades < 30`; the per-trade expectation and P&L fields are dollars per contract, and total P&L/capital fields are dollars.
+
+### Complete daily Stage 0 accounting
+
+- **Path:** `data/backtest/stage0_daily.parquet`
+- **Rows / coverage:** 150 rows: 54 train population dates for each basis (108 rows), 21 validation dates for each basis (42 rows). The train calendar starts `2026-05-27`, not `2026-05-26`. Both basis settings have complete population calendars; zero-trade days occur at 5.0 bps (8 train and 7 validation), and their additive fields are zero.
+- **Unique key:** `(split, basis_bps, close_date)`; checked on disk.
+- **Outcome status and purpose:** Outcome-bearing daily additive accounting by the frozen `close_date` split key, including zero-trade population days. This is the input to daily descriptive statistics, while clustered inference uses only traded-day clusters.
+- **On-disk columns:** `split`, `basis_bps`, `threshold_role`, `tier_label`, `close_date`, `n_trades`, `gross_pnl`, `fees`, `net_pnl`, `model_expected_pnl`, `market_fair_expected_pnl`, `total_capital`. Additive monetary fields are dollars across that day's one-contract trades.
+
+### Stage 0 correlation and concentration statistics
+
+- **Path:** `data/backtest/stage0_correlation.parquet`
+- **Rows / coverage:** 4 rows: one per train/validation × 1.2/5.0-bps book (2 train, 2 validation).
+- **Unique key:** `(split, basis_bps)`; checked on disk.
+- **Outcome status and purpose:** Outcome-bearing statistical and concentration output. The naive SE treats trades separately; `se_cluster` and its ±2SE interval use traded `close_date` days, not all population days. This file also stores daily and weekly concentration diagnostics; it does not contain week-clustered inference.
+- **On-disk columns:** `split`, `basis_bps`, `threshold_role`, `tier_label`, `n_trades`, `n_population_days`, `n_days_with_trade`, `mean_net_pnl_per_trade`, `se_naive`, `naive_lower_2se`, `naive_upper_2se`, `se_cluster`, `cluster_lower_2se`, `cluster_upper_2se`, `design_effect`, `se_inflation_factor`, `n_eff`, `mean_daily_net_pnl`, `sample_sd_daily_net_pnl`, `positive_trading_day_share`, `best_day`, `best_day_net_pnl`, `worst_day`, `worst_day_net_pnl`, `largest_day_abs_share_of_total_abs_net_pnl`, `n_weeks`, `n_weeks_same_sign_as_total_net_pnl`, `largest_week_abs_share_of_total_abs_net_pnl`, `total_net_pnl`, `primary_interpretation`. SEs, intervals, daily P&L, and total P&L are dollars; `design_effect`, `se_inflation_factor`, shares, and `n_eff` are unitless; the interpretation is populated only for the primary validation 1.2-bps row.
