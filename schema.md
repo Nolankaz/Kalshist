@@ -522,3 +522,62 @@ The following row counts, columns, and unique keys were checked against the on-d
 - **Unique key:** `(split, basis_bps)`; checked on disk.
 - **Outcome status and purpose:** Outcome-bearing statistical and concentration output. The naive SE treats trades separately; `se_cluster` and its ±2SE interval use traded `close_date` days, not all population days. This file also stores daily and weekly concentration diagnostics; it does not contain week-clustered inference.
 - **On-disk columns:** `split`, `basis_bps`, `threshold_role`, `tier_label`, `n_trades`, `n_population_days`, `n_days_with_trade`, `mean_net_pnl_per_trade`, `se_naive`, `naive_lower_2se`, `naive_upper_2se`, `se_cluster`, `cluster_lower_2se`, `cluster_upper_2se`, `design_effect`, `se_inflation_factor`, `n_eff`, `mean_daily_net_pnl`, `sample_sd_daily_net_pnl`, `positive_trading_day_share`, `best_day`, `best_day_net_pnl`, `worst_day`, `worst_day_net_pnl`, `largest_day_abs_share_of_total_abs_net_pnl`, `n_weeks`, `n_weeks_same_sign_as_total_net_pnl`, `largest_week_abs_share_of_total_abs_net_pnl`, `total_net_pnl`, `primary_interpretation`. SEs, intervals, daily P&L, and total P&L are dollars; `design_effect`, `se_inflation_factor`, shares, and `n_eff` are unitless; the interpretation is populated only for the primary validation 1.2-bps row.
+
+## Day 12 Model Artifacts
+
+The following schemas, counts, and keys were checked against the saved files. Day 12 artifacts contain train and/or validation only; none contains a test row. The final pre-fit amendment uses nine model features: `stage0_logit`, `log_sigma`, `log_ratio_5m_1h`, `log_ratio_15m_4h`, `log_ratio_1h_24h`, `sin_hour`, `cos_hour`, `stage0_logit_x_log_ratio_5m_1h`, and `stage0_logit_x_log_sigma`. The two interaction columns are constructed in the model-fitting code and are not stored in `derived_features.parquet`. Probabilities, Brier scores, edges, and surprises are in probability units; one-contract P&L and fees are dollars.
+
+### Derived features
+
+- **Path:** `data/features/derived_features.parquet`.
+- **Rows / unique key:** 14,358 train/validation rows; `(ticker, horizon_minutes)`. Of these, `is_common` selects 12,883 Day 9 common rows. This single-file model-ready table follows the existing `market_features.parquet` exception to daily storage so the small fixed walk-forward population can be read consistently.
+- **On-disk columns:** `ticker`, `horizon_minutes`, `split`, `close_date`, `decision_time`, `hour_utc`, `is_common`, `stage0_logit`, `z_5min_ewma_vol`, `log_sigma`, `log_ratio_5m_1h`, `log_ratio_15m_4h`, `log_ratio_1h_24h`, `sin_hour`, `cos_hour`.
+- **Purpose and semantics:** Outcome-free, quote-free base features and diagnostic Stage 0 z. `split` and `close_date` identify the frozen population; `decision_time` is UTC-aware. `is_common` identifies rows where all ten Stage 0 candidate probabilities exist. `log_vol_of_vol` is absent under the recorded pre-fit amendment.
+
+### Walk-forward schedule
+
+- **Path:** `data/models/walk_forward_schedule.parquet`.
+- **Rows / unique key:** 12 rows; `(fold, horizon_minutes)` for six folds and T-10/T-5.
+- **On-disk columns:** `fold`, `fit_start`, `fit_end`, `score_start`, `score_end`, `horizon_minutes`, `fit_rows`, `score_rows`.
+- **Purpose and semantics:** Frozen expanding fit/score dates and common-population counts. The final score date is `2026-08-09`; these are date boundaries, not estimated model parameters.
+
+### Logistic out-of-fold predictions
+
+- **Path:** `data/models/logistic_oof_predictions.parquet`.
+- **Rows / unique key:** 17,358 rows; `(configuration, ticker, horizon_minutes)`. M1 and B1 have 7,012 rows each; M2 has 3,334 validation rows.
+- **On-disk columns:** `configuration`, `ticker`, `horizon_minutes`, `split`, `close_date`, `fold`, `probability`, `stage0_platt_probability`, `y`.
+- **Purpose and semantics:** Frozen scored model probabilities, carried legitimate train-fitted Stage 0 comparator, and binary outcome. `configuration` is `m1_walk_forward`, `m2_train_only`, or `b1_walk_forward_stage0`. M1/B1 use frozen walk-forward folds; M2 fits train only and scores validation. SHA-256 prediction fingerprint: `78a0e3cda08734a778d7a3c49fa7cbe5156f71a0f7d1bc93df404903a1a36512`.
+
+### Logistic coefficients and C selection
+
+- **Paths:** `data/models/logistic_coefficients.parquet` and `data/models/logistic_fold_selection.parquet`.
+- **Rows / unique keys:** coefficients: 138 rows, `(configuration, fold, horizon_minutes, feature)`; C selection: 98 rows, `(configuration, fold, horizon_minutes, C)`.
+- **Coefficient columns:** `configuration`, `fold`, `horizon_minutes`, `feature`, `coefficient_standardized`, `coefficient_original`, `fit_mean`, `fit_sd`, `intercept_standardized`, `intercept_original`, `selected_C`, `n_fit_rows`, `n_iter`.
+- **Selection columns:** `configuration`, `fold`, `horizon_minutes`, `C`, `inner_train_rows`, `inner_holdout_rows`, `inner_holdout_start`, `inner_holdout_end`, `inner_brier`, `selected`.
+- **Purpose and semantics:** Train-window fit parameters and seven-grid inner-holdout Brier records. M1/M2 coefficient groups contain the nine amended features; B1 contains `stage0_logit` only and has no C-selection rows. `fit_mean` and positive `fit_sd` are fit-window-only scaler parameters; the interactions were formed before standardization. `selected_C` and `selected` identify the minimum-inner-Brier C, with exact ties choosing smaller C. C selection uses the last seven fit-window `close_date` days; no rows from the current outer score window enter its inner holdout. Earlier M1 score windows join later expanding fit windows under the frozen schedule.
+
+### Model comparison
+
+- **Path:** `data/models/model_comparison.parquet`.
+- **Rows / unique key:** 217 rows; `(configuration, comparison_window, horizon_minutes, breakdown, breakdown_value, metric)`.
+- **On-disk columns:** `configuration`, `comparison_window`, `horizon_minutes`, `breakdown`, `breakdown_value`, `metric`, `model_value`, `stage0_value`, `market_value`, `difference`, `paired_se`, `meaningful`, `n`, `thin`.
+- **Purpose and semantics:** Saved probability comparisons on identical rows. `comparison_window` is `validation_primary`, `train_secondary`, or `all_oof_descriptive`; `configuration` has the three values above. Metrics are Brier, log loss, AUC, and ECE; Brier also has paired model-minus-Stage-0 `difference`, `paired_se`, and the frozen two-SE `meaningful` flag. `market_value` is quote-mid Brier context. `breakdown` is `overall`, `abs_z`, or `price_bucket`; `thin` means fewer than 30 rows. `horizon_minutes = 0` denotes the pooled T-10/T-5 sentinel, not a real horizon. The primary verdict uses M2 validation overall Brier rows, not M1/B1 context.
+
+### Model-own edge threshold
+
+- **Path:** `data/models/model_edge_threshold.parquet`.
+- **Rows / unique key:** 14 rows; `(horizon_minutes, basis_bps, threshold_role, price_bucket)` for T-10/T-5 and seven frozen quote-mid buckets.
+- **On-disk columns:** `horizon_minutes`, `basis_bps`, `threshold_role`, `price_bucket`, `basis_term`, `model_error_term`, `required_net_edge`, `basis_validation_row_count`, `basis_statistic`, `model_error_statistic`, `probability_version`, `fee_model_status`, `order_size`, `bucket_merge_fired`.
+- **Purpose and semantics:** Secondary M2-only 1.2 bps threshold; `threshold_role = model_own_bar`, `probability_version = m2_train_only`. `required_net_edge = basis_term + model_error_term`; the first term is M2's own ±1.2 bps basis sensitivity, and the second is saved M2 validation ten-decile ECE. It is distinct from the frozen Stage 0 fixed bar used for the primary comparison. `bucket_merge_fired` records the pre-registered sparse-cell rule.
+
+### Model trade decisions and validation results
+
+- **Paths:** `data/backtest/model_trade_decisions.parquet` and `data/backtest/model_results_validation.parquet`.
+- **Rows / unique key:** 2,246 rows each; `(probability_version, threshold_role, basis_bps, ticker)`. The fixed bar has 728 M2 and 756 M1 trades; the secondary model-own bar has 762 M2 trades. All rows have `split = validation` and `basis_bps = 1.2`.
+- **Decision columns:** The 41 Day 11 decision columns listed under “Frozen Stage 0 trade decisions” above, in the same on-disk order. Important provenance is `probability_version` (`m1_walk_forward` or `m2_train_only`), `threshold_role` (`stage0_fixed_bar` or `model_own_bar`), `split`, `close_date`, `horizon_minutes`, `decision_time`, `price_bucket`, `required_net_edge`, and `sigma_candidate`. Execution fields include `side`, `entry_price_mils`, `fee`, `net_edge`, `signal_eligible`, and `threshold_clear`.
+- **Result-only columns:** `settlement_value`, `payoff`, `hit`, `gross_pnl`, `net_pnl`, `capital`, `surprise`, appended to the decision columns after validation settlement. Decisions are outcome-free; results are outcome-bearing Tier 2 one-contract accounting. `stage0_fixed_bar` is the primary common threshold; `model_own_bar` is secondary. The earliest threshold-clearing decision per market is retained within each probability/threshold book. The fixed-bar-only decision fingerprint is `72a50a6494e75f2de221756e22aba66053f9e7a597b2f809ec606a0274c828a2`; the final two-bar fingerprint is `1b8df668ae4d6e9ce77dc08abb11f1ec710361c8f2258bbf2505ba0c7306dc18`.
+
+### Day 12 plots
+
+- **`data/models/plots/logistic_vs_stage0_reliability.png`:** Descriptive M2, frozen Stage 0, and market quote-mid reliability at T-10/T-5 on validation common rows, with Wilson intervals and a perfect-calibration diagonal. It is not a verdict test.
+- **`data/backtest/plots/model_vs_stage0_daily_net_pnl.png`:** Primary fixed-bar M2 and frozen Stage 0 daily net P&L, plus M2-minus-Stage-0 daily differences across the 21 validation dates. The model-own book is not the primary plotted comparison.

@@ -503,3 +503,294 @@ The outcome-free decision list had SHA-256 fingerprint `f0f3fbb27ac36c8fdfeca436
 **Tier 2 — quote-aware, top-of-book, size-unaware. One contract, taker entry, held to settlement.** The primary validation 1.2-bps book had **719 trades on 21 population days and 21 traded days**. Its mean realized net P&L was **-$0.017710570236 per trade**; the pre-registered traded-day-clustered SE was **$0.012277194816**, giving the clustered **±2SE interval [-$0.042264959869, +$0.006843819396] per trade**. The interval crosses zero. The exact frozen interpretation is: **"No tier-2 evidence of edge either way; not established."** The 5.0-bps book remains sensitivity only. Full accounting, breakdowns, daily/weekly concentration, and statistical caveats are in [`backtest_notes.md`](backtest_notes.md).
 
 Test-set status (Day 11): the test split was not read.
+
+## Day 12 Model Protocol
+
+This protocol is frozen before any Day 12 feature is created or any Day 12 model is fitted. It is documentation and pre-registration only.
+
+### 1. Scope
+
+Day 12 uses only the Day 9 common rows: rows at T-10 or T-5 for which all ten Stage 0 probability candidates are non-null. It uses train and validation only, with the stored string column `close_date` as the split key. **The test split is not loaded or inspected.** Models are fitted separately by horizon. Stage 0 re-scored on the identical rows is the sole baseline of record; no alternative baseline may replace it after results are observed.
+
+### 2. Inherited frozen rules
+
+Day 12 inherits the following rules unchanged:
+
+- The six Day 8 walk-forward fold boundaries and expanding-fit schedule.
+- The Day 9 common population.
+- `PLATT_CLIP = 1e-6` in `platt_feature(...)`.
+- The Day 10 execution machinery and additive threshold composition rule, `required_net_edge = basis_term + model_error_term`.
+- The Day 11 accounting identities, one-position-per-market rule, and traded-`close_date` clustered-SE formula. For `N` trades on `D` traded days with mean net P&L `m`, that formula remains `SE = sqrt(D / (D - 1) * sum_d (sum_{i in d}(net_pnl_i - m))^2 / N^2)`.
+
+No inherited rule is reopened by this protocol.
+
+### 3. Frozen feature list and hypotheses
+
+The model has exactly the following 11 features, plus an intercept. Each stated sign is a pre-fit hypothesis, not a result.
+
+1. `stage0_logit = platt_feature(p_5min_ewma_vol)`
+   - This is the baseline carrier: it preserves the selected Stage 0 probability signal on the log-odds scale, so the model nests horizon-specific Platt calibration when all other coefficients are zero.
+   - Its expected sign is strongly positive, around the existing Platt slope scale, because higher Stage 0 YES probability should map to higher fitted YES probability and the current Platt fits already establish that monotone direction.
+
+2. `log_sigma = log(5min_ewma_vol)`
+   - This represents the absolute short-window volatility-level regime, allowing a common Stage 0 logit to receive a level-dependent intercept adjustment.
+   - Its expected sign is not predicted and should be small because volatility already enters Stage 0's denominator; any remaining standalone level effect could reasonably operate in either direction.
+
+3. `log_ratio_5m_1h = log(5min_vol / 1hr_vol)`
+   - This measures short-horizon volatility expansion or contraction relative to the recent one-hour regime.
+   - Its expected main-effect sign is approximately zero because the hypothesis is that this ratio changes the reliability or scale of Stage 0 confidence, not the unconditional YES direction.
+
+4. `log_ratio_15m_4h`
+   - This captures medium-horizon volatility expansion or contraction relative to the broader four-hour regime.
+   - Its expected main-effect sign is approximately zero because a symmetric change in volatility regime should affect confidence calibration rather than systematically favor YES or NO.
+
+5. `log_ratio_1h_24h`
+   - This captures session-scale volatility relative to the trailing daily regime.
+   - Its expected main-effect sign is approximately zero because the regime comparison is intended to describe calibration conditions, not provide directional price information.
+
+6. `log_vol_of_vol`
+   - This measures recent instability in short-window volatility, distinguishing a stable volatility estimate from one moving through a turbulent regime.
+   - Its expected main-effect sign is approximately zero because instability alone should change confidence rather than create a persistent YES or NO tilt.
+
+7. `sin_hour`
+   - This is the sine component of UTC intraday seasonality, allowing a smooth cyclical time-of-day effect without a discontinuity at midnight.
+   - Its expected effect is small and no sign is predicted because the phase and direction of any intraday calibration pattern are not known in advance.
+
+8. `cos_hour`
+   - This is the complementary cosine component needed to represent UTC intraday seasonality without forcing a fixed phase.
+   - Its expected effect is small and no sign is predicted because any time-of-day calibration pattern is cyclical and has no pre-registered directional phase.
+
+9. `stage0_logit × log_ratio_5m_1h`
+   - This permits regime-dependent rescaling of Stage 0 confidence when short-window volatility expands or contracts relative to the one-hour window.
+   - Its expected sign is positive under the Day 12 hypothesis: short-horizon volatility expansion should strengthen the mapping from the Stage 0 logit to the outcome rather than create a standalone directional shift.
+
+10. `stage0_logit × log_vol_of_vol`
+    - This permits the Stage 0 confidence scale to respond to instability in the volatility estimate.
+    - Its expected sign is negative because unstable volatility should shrink confidence toward 0.5 rather than leave extreme Stage 0 logits fully trusted.
+
+11. `stage0_logit × log_sigma`
+    - This permits volatility-level-dependent rescaling of Stage 0 confidence beyond the standalone volatility-level term.
+    - Its expected sign is not predicted because the existing train/validation regime shift does not establish whether a higher volatility level should strengthen or weaken the Stage 0 logit after the other frozen terms are included.
+
+### 4. Excluded features
+
+The model will not use:
+
+- Any quote-derived feature, including `quote_mid`, `quote_yes_bid`, `quote_yes_ask`, `quote_spread`, or any other bid/ask/mid/price-derived column.
+- Raw `z_5min_ewma_vol` as a model input.
+- `day_of_week`.
+- `fwd_log_return`.
+- Any `FUTURE_ONLY` column.
+- Any feature outside the frozen list above.
+
+No feature may be added after any score is seen. Quote-derived columns remain available only where a frozen execution or descriptive rule explicitly requires them; they are not model inputs.
+
+### 5. Preprocessing
+
+Every model feature is standardized to zero mean and unit variance. The mean and standard deviation are fitted from fit-window rows only and then applied unchanged to the corresponding scored rows. Interaction features are constructed from their unstandardized components first; the resulting interaction column is then standardized using fit-window statistics. The intercept remains unpenalized.
+
+### 6. Configurations
+
+#### M1 — walk-forward
+
+M1 uses the six frozen Day 8 folds and an expanding fit window:
+
+| Fold | Fit dates | Score dates |
+| --- | --- | --- |
+| 1 | 2026-05-26 through 2026-06-28 | 2026-06-29 through 2026-07-05 |
+| 2 | 2026-05-26 through 2026-07-05 | 2026-07-06 through 2026-07-12 |
+| 3 | 2026-05-26 through 2026-07-12 | 2026-07-13 through 2026-07-19 |
+| 4 | 2026-05-26 through 2026-07-19 | 2026-07-20 through 2026-07-26 |
+| 5 | 2026-05-26 through 2026-07-26 | 2026-07-27 through 2026-08-02 |
+| 6 | 2026-05-26 through 2026-08-02 | 2026-08-03 through 2026-08-09 |
+
+Its expected out-of-fold population is 7,012 Day 9 common rows: 3,531 T-10 rows and 3,481 T-5 rows.
+
+#### M2 — train-only
+
+M2 fits once on train common rows and scores validation common rows. Its fit population is 4,792 T-10 rows and 4,757 T-5 rows. Its score population is 1,685 T-10 rows and 1,649 T-5 rows, or 3,334 validation rows in total. M2 is the primary head-to-head configuration against Stage 0.
+
+#### B1 — walk-forward Stage 0
+
+B1 uses the same walk-forward harness with one feature only, `stage0_logit`. It is effectively unregularized and is used to prove equivalence to the existing `fit_platt(...)` implementation on identical fit and score rows.
+
+### 7. Regularization
+
+The M1 and M2 logistic fits use exactly:
+
+```text
+penalty="l2"
+solver="lbfgs"
+max_iter=1000
+tol=1e-6
+C ∈ {0.01, 0.03, 0.1, 0.3, 1, 3, 10}
+```
+
+For each regularized configuration and horizon, the last seven `close_date` days of the current fit window form an inner holdout. Choose `C` by the lowest Brier score on that inner holdout. A tie selects the smaller `C`, meaning stronger regularization. Then refit on the entire fit window using the selected `C`. Outer scored rows never participate in `C` selection. B1 retains its separately frozen effectively unregularized role so it can test equivalence to `fit_platt(...)`.
+
+A fixed `C = 1` sensitivity run is also pre-registered. It is a sensitivity analysis and cannot replace the selected-`C` primary result after scores are observed.
+
+### 8. Comparison populations
+
+- **Primary:** folds 4–6, which are the validation common rows: 3,334 rows.
+- **Secondary:** folds 1–3, which are train dates: 3,678 rows. This population is explicitly labeled Stage 0 in-sample for its calibrator.
+- **Descriptive:** all six folds: 7,012 rows.
+
+These populations are frozen and cannot be changed after scoring.
+
+### 9. Probability metrics
+
+The primary probability metric is Brier score. Comparison with Stage 0 is performed per horizon and as a pooled row-count-weighted result. On each identical scored row, define the paired squared-error difference:
+
+`d_i = (p_model - y)^2 - (p_stage0 - y)^2`
+
+The paired standard error is:
+
+`SE(d) = sd(d) / sqrt(n)`
+
+A difference is meaningful only when `abs(mean(d)) > 2 * SE(d)`. A negative `mean(d)` favors the Day 12 model; a positive `mean(d)` favors Stage 0.
+
+Secondary diagnostics are log loss, AUC, and 10-decile ECE. They are reported but do not decide the verdict.
+
+### 10. Economic comparisons
+
+Both economic comparisons below are pre-registered.
+
+#### A. Fixed-bar comparison
+
+Use Stage 0's frozen 1.2 bps `data/execution/edge_threshold.parquet`. This is Stage 0's fixed error-budget bar, not the Day 12 model's own threshold. The Stage 0 comparison uses the frozen Day 11 results restricted to the comparable calendar. The validation Stage 0 book contains 719 trades.
+
+#### B. Model-own-threshold comparison
+
+Reapply the Day 10 composition rule:
+
+`required_net_edge = basis_term + model_error_term`
+
+The `basis_term` comes from the Day 12 model's own ±1.2 bps spot-perturbation sensitivity. The `model_error_term` comes from the Day 12 model's 10-decile validation ECE. Use the same seven frozen `quote_mid` price buckets:
+
+1. `[0.00, 0.10)`
+2. `[0.10, 0.25)`
+3. `[0.25, 0.40)`
+4. `[0.40, 0.60)`
+5. `[0.60, 0.75)`
+6. `[0.75, 0.90)`
+7. `[0.90, 1.00]`
+
+Use the same sparse-cell merge rule: a `(horizon, price_bucket)` cell with fewer than 50 validation common rows merges with its adjacent bucket toward `0.50`, with low-side buckets merging upward and high-side buckets merging downward. Compute this model-own threshold once. It may not be revised after clearance or P&L is observed.
+
+### 11. Paired economic statistic
+
+The paired economic comparison uses all 21 validation `close_date` days. For day `i`, define the daily total net P&L difference:
+
+`d_i = model_net_pnl(day i) - stage0_net_pnl(day i)`
+
+Report:
+
+`mean(d) ± 2 * sd(d) / sqrt(21)`
+
+Zero-trade days are included with zero daily total net P&L for the corresponding book. Also report each book's trade count, population-day and traded-day counts, total fees, and its own Day 11 clustered interval. The two books may differ in size; this is not a capital-matched comparison.
+
+### 12. Frozen descriptive breakdowns
+
+The following breakdowns are pre-registered:
+
+- Horizon.
+- Frozen `abs(z_5min_ewma_vol)` buckets: `[0, 0.25)`, `[0.25, 0.5)`, `[0.5, 1.0)`, and `[1.0, infinity)`.
+- The frozen seven `quote_mid` price buckets.
+
+Every cell with fewer than 30 rows is labeled `thin`. These breakdowns are descriptive only and may not become a new filter or model-selection rule.
+
+### 13. Verdict categories
+
+Exactly four verdict categories are frozen for M2 on validation:
+
+**A — improves on Stage 0**
+
+- Brier is meaningfully better at both horizons, or pooled with no per-horizon reversal.
+- And `mean(d) - 2*SE(d) > 0` for the paired daily net P&L difference.
+
+**B — better probabilities, no economic improvement**
+
+- Brier is meaningfully better.
+- The P&L-difference interval contains zero or is below zero.
+
+**C — no meaningful difference; did not beat Stage 0**
+
+- The Brier difference is within two paired standard errors.
+- The P&L-difference interval contains zero.
+- Ties go to Stage 0.
+
+**D — worse**
+
+- Brier is meaningfully worse at either horizon.
+- Or `mean(d) + 2*SE(d) < 0` for the paired daily net P&L difference.
+
+M1's verdict will be recorded separately later, with the caveat that folds 5–6 fit on earlier validation outcomes under the frozen Day 8 schedule.
+
+### 14. Determinism and no iteration
+
+Fitting must be deterministic. A second run must reproduce every coefficient to `1e-10`. No feature, transform, `C` grid, fold boundary, population, metric, or verdict rule may change after scores are seen. Only a bug that violates a written invariant may be fixed. Any such fix must later be documented in `model_notes.md` with its justification and before/after behavior.
+
+### 15. Validation-query ledger
+
+Append the following two Day 12 entries to the validation-query ledger; earlier entries remain unchanged:
+
+| # | Day | Validation outcome use | Purpose | Classification / caveat |
+| --- | --- | --- | --- | --- |
+| 8 | 12 | Day 12 model-error term: 10-decile ECE of the Day 12 model on validation | Derive the model's own edge threshold | Decision |
+| 9 | 12 | Day 12 fitted-model probability scores and Tier-2 validation P&L | Decision support for whether logistic proceeds to Day 13/14 | M1 caveat: folds 5–6 fit on earlier validation outcomes under the frozen Day 8 schedule |
+
+These are pre-registered validation uses, not results.
+
+### 16. Frozen prediction-table placeholders
+
+These fields are intentionally blank until Day 12 §2.2 produces the predictions:
+
+| Prediction artifact field | Value |
+| --- | --- |
+| M1 row count | 7,012 |
+| M2 row count | 3,334 |
+| B1 row count | 7,012 |
+| Total prediction rows | 17,358 |
+| Prediction SHA-256 fingerprint | `78a0e3cda08734a778d7a3c49fa7cbe5156f71a0f7d1bc93df404903a1a36512` |
+
+## Day 12 Model Protocol Amendment — Vol-of-Vol Removed Pre-Fit
+
+During Day 12 §1.3 feature construction, before any Day 12 model fit or score, the frozen `log_vol_of_vol` completeness invariant failed against the train/validation source data. Among scored Day 9 common T-10 rows, 103 had fewer than the required 20 non-null `5min_vol` observations in the previous 24 T-10 decisions: fold 2 had 16, fold 3 had 20, fold 4 had 22, fold 5 had 13, and fold 6 had 32. The provisional eight-hour maximum-span guard also produced fold-1 nulls, but widening that guard cannot repair these 103 insufficient-history rows. No derived-feature Parquet was successfully written during that attempt; the provisional builder was removed.
+
+This affects more than a handful of scored rows, so the Day 12 pre-fit failure rule is invoked. No imputation rule is introduced, the 20-observation minimum is not weakened, and the frozen scored population is not changed. Instead, `log_vol_of_vol` and its dependent `stage0_logit × log_vol_of_vol` interaction are removed from the Day 12 model specification. The model now has exactly nine features plus an intercept:
+
+1. `stage0_logit`
+2. `log_sigma`
+3. `log_ratio_5m_1h`
+4. `log_ratio_15m_4h`
+5. `log_ratio_1h_24h`
+6. `sin_hour`
+7. `cos_hour`
+8. `stage0_logit × log_ratio_5m_1h`
+9. `stage0_logit × log_sigma`
+
+The two remaining interaction terms are exactly `stage0_logit × log_ratio_5m_1h` and `stage0_logit × log_sigma`. They will be constructed inside the later model implementation, not stored by the §1.3 feature builder. Any later Day 12 instruction referring to “11 features,” “three interactions,” or `log_vol_of_vol` is superseded by this amendment.
+
+This amendment precedes every Day 12 model coefficient and model score; it was not chosen in response to model performance. Every other Day 12 protocol choice remains frozen and unchanged: M1/M2/B1, Day 8 fold boundaries, Day 9 common and scored populations, standardization rules, the `C` grid and inner-holdout selection, probability metrics, economic comparisons, verdict categories, validation-query ledger entries, and the prohibition on reading the test split. No earlier protocol or ledger entry is edited.
+
+### Validation-query ledger — Day 12 §3.2 additions
+
+The pre-registered Day 12 validation uses numbered 8 and 9 have now occurred. Entry 8 used the exact §3.1 M2 validation ten-decile ECE as the model-error term for the separately labelled model-own threshold. Entry 9 scored frozen Day 12 probabilities and evaluated Tier-2 validation P&L under the fixed Stage 0 bar and the secondary model-own bar. No parameter was changed after these outcomes. The numerical results are recorded in `model_notes.md`; the final Day 12 verdict is reserved for §3.3.
+
+| # | Day | Validation outcome use | Purpose | Classification / caveat |
+| --- | --- | --- | --- | --- |
+| 8 | 12 | Day 12 model-error term: 10-decile ECE of the Day 12 M2 model on validation | Derive the model's own edge threshold | Decision |
+| 9 | 12 | Day 12 fitted-model probability scores and Tier-2 validation P&L | Decision support for whether logistic proceeds to Day 13/14 | M1 caveat: folds 5–6 fit on earlier validation outcomes under the frozen Day 8 schedule |
+
+## Day 12 Model Result
+
+The pre-registered M2 validation verdict is **C — no meaningful difference; did not beat Stage 0**. The frozen prediction fingerprint is `78a0e3cda08734a778d7a3c49fa7cbe5156f71a0f7d1bc93df404903a1a36512`.
+
+On identical validation common rows, T-10 M2 versus Stage 0 Brier was 0.189066840 versus 0.189792806, paired difference −0.000725966, paired SE 0.000889613, 2SE 0.001779227, not meaningful. T-5 was 0.116485755 versus 0.116474357, difference +0.000011398, paired SE 0.000554122, 2SE 0.001108244, not meaningful. The pooled difference −0.000361265 with paired SE 0.000526518 was not meaningful. Thus the meaningful-probability condition for A or B was absent; neither horizon was meaningfully worse for D.
+
+The primary Tier-2 fixed-bar comparison used the frozen Stage 0 1.2 bps threshold. M2 made 728 validation trades, net P&L −$18.226600, net/trade −$0.025036538, with traded-day-clustered per-trade interval [−$0.046743937, −$0.003329140]. Frozen Stage 0 made 719 trades, net P&L −$12.733900, net/trade −$0.017710570. The pre-registered 21-day paired M2-minus-Stage-0 daily net P&L mean was −$0.261557143, SE $0.321544483, 2SE $0.643088966, interval [−$0.904646109, +$0.381531823]. Zero lies inside it, so the economic requirement for A and the wholly negative interval condition for D were absent. The numerical P&L gap does not override the frozen category.
+
+The separately labelled **secondary** `model_own_bar` used the additive model-own basis-sensitivity plus M2 ECE threshold. It made 762 validation trades, net P&L −$19.556200, net/trade −$0.025664304; it does not determine the primary verdict. M1 validation folds 4–6 are context only: folds 5–6 fitted on earlier validation outcomes and do not replace the M2 train-only protocol-identical comparison. The deterministic read-only rerun reproduced all 14 selected C values, coefficients, scalers, and predictions exactly. No parameter changed after validation outcomes. Full results and the four fingerprints are in `model_notes.md` §3.3.
+
+**Test-set status (2026-09-25): the test split was not read on Day 12.** Day 12 is frozen.
