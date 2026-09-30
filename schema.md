@@ -581,3 +581,63 @@ The following schemas, counts, and keys were checked against the saved files. Da
 
 - **`data/models/plots/logistic_vs_stage0_reliability.png`:** Descriptive M2, frozen Stage 0, and market quote-mid reliability at T-10/T-5 on validation common rows, with Wilson intervals and a perfect-calibration diagonal. It is not a verdict test.
 - **`data/backtest/plots/model_vs_stage0_daily_net_pnl.png`:** Primary fixed-bar M2 and frozen Stage 0 daily net P&L, plus M2-minus-Stage-0 daily differences across the 21 validation dates. The model-own book is not the primary plotted comparison.
+
+## Day 13 HAR-RV Artifacts
+
+The paths, column order, row counts, and logical-key uniqueness below were checked against the saved Parquet files. Day 13 artifacts cover train and/or validation only; they contain no test row. `horizon_minutes` is T-10 or T-5 except comparison rows where `0` is the pooled probability sentinel. H1 is `h1_walk_forward` (7,012 score rows: 3,531 T-10 / 3,481 T-5); H2 is `h2_train_only` (3,334 validation score rows: 1,685 / 1,649). These are historical research artifacts, not general-purpose live feature tables.
+
+### Quarantined forward-volatility target — FUTURE_ONLY
+
+- **Path / purpose:** `data/targets/forward_vol_target.parquet`; one physically separated target lookup for the fixed modelling population. The new `data/targets/` directory keeps future values away from ordinary feature artifacts; a single file is intentional because the small, fixed train/validation population is read as a whole, as with `market_features.parquet`.
+- **Rows / unique key / population:** 14,358 train+validation rows; `(ticker, horizon_minutes)`. Of the 12,883 Day 9 common rows, target nulls are train T-10 27, train T-5 62, validation T-10 41, validation T-5 61.
+- **Actual on-disk columns:** `ticker`, `horizon_minutes`, `close_date`, `decision_time`, `close_time`, `split`, `is_common`, `fwd_window_seconds`, `fwd_n_obs`, `fwd_coverage`, `fwd_rv`, `fwd_log_rv`.
+- **Units / semantics:** `decision_time` and `close_time` are UTC; `fwd_window_seconds` and `fwd_n_obs` are seconds/one-second-return counts; `fwd_coverage` is a fraction. `fwd_rv` is annualized simple volatility and `fwd_log_rv` is log annualized volatility. The one-second cross-exchange proxy return labels are in `[decision_time, close_time)` with ≤10-second forward fill. T-5 needs ≥240/300 returns and T-10 ≥480/600; coverage failures produce null targets, never imputation.
+- **Outcome / future / input status:** **Future-target-bearing and FUTURE_ONLY.** All non-key target/diagnostic value columns have the `fwd_` prefix. Never join any `fwd_` value into a model design or live feature table; the feature safety guard rejects them. No test target exists.
+
+### Frozen HAR/N1 forecasts
+
+- **Path / purpose:** `data/models/har_forecasts.parquet`; saved log-volatility forecasts before scoring.
+- **Rows / unique key / population:** 10,346; `(configuration, ticker, horizon_minutes)`; H1 7,012 and H2 3,334 as above. `fold` retains H1 fold IDs and the H2 train-only fit ID.
+- **Actual on-disk columns:** `configuration`, `ticker`, `horizon_minutes`, `split`, `close_date`, `fold`, `log_rv_har`, `log_rv_n1`, `log_rv_naive_s0`, `log_rv_naive_15`.
+- **Units / status:** Each `log_rv_*` value is log annualized volatility. **Outcome-free and without a `fwd_` future-target column** on the scored row; no `y` is present. These are historical predictions for the controlled comparison, not a general model-input feature table. H1 folds 5–6 were fit using earlier validation targets and outcomes; do not treat all H1 rows as independent validation.
+
+### Frozen HAR/N1-fed probabilities
+
+- **Path / purpose:** `data/models/har_probabilities.parquet`; frozen calibrated probability rows for the sigma-swap comparison.
+- **Rows / unique key / population:** 10,346; `(configuration, ticker, horizon_minutes)`; H1 7,012 and H2 3,334. `b1_probability` is populated on H1 rows only and null on H2, never zero-filled.
+- **Actual on-disk columns:** `configuration`, `ticker`, `horizon_minutes`, `split`, `close_date`, `fold`, `probability`, `probability_n1_control`, `stage0_platt_probability`, `b1_probability`, `y`.
+- **Units / status:** Probabilities are unitless values in `(0,1)`; `y` is a binary settled outcome. **Outcome-bearing, not outcome-free.** There is no row-level `fwd_` target value, but `y` makes this file unsafe as a live/model input. The oracle has no row-level probability column here.
+
+### Fitted coefficients before scores
+
+- **Path / purpose:** `data/models/har_coefficients.parquet`; explicit per-fit coefficients retained for the pre-score reading and audit.
+- **Rows / unique key / population:** 140; `(configuration, fold, horizon_minutes, model, term)`; six H1 folds and one H2 fit per horizon. `model` is `har`, `n1`, `platt_har`, or `platt_n1`; terms are HAR intercept/three log-volatility slopes, N1 intercept/EWMA-5 slope, or Platt intercept/`stage0_raw_logit` slope.
+- **Actual on-disk columns:** `configuration`, `fold`, `horizon_minutes`, `model`, `term`, `coefficient`, `classical_se_understated_autocorrelation`, `n_fit_rows`, `n_fit_rows_dropped_null_target`, `in_sample_r2`, `ols_cross_check_error`.
+- **Units / status:** Coefficients have their model's log-volatility or logit design units; `n_*` are row counts, R² is unitless, and `ols_cross_check_error` is a coefficient-unit absolute difference. `classical_se_understated_autocorrelation` is a **classical OLS SE, understated under residual autocorrelation** and not a verdict SE. The file has no per-row outcome or future target, but fitted parameters depend on train/expanding-window target and Platt outcomes. It is a parameter audit, not a live design table.
+
+### Forward-volatility comparison
+
+- **Path / purpose:** `data/models/har_vol_comparison.parquet`; frozen scored log-volatility metrics, paired losses, and V categories.
+- **Rows / unique key / population:** 184; `(configuration, population, horizon_minutes, model, benchmark, metric)`. H2 `h2_validation` is primary (target-bearing T-10 `n=1,644`, T-5 `n=1,588`); H1 `h1_all_oof`, `h1_folds_1_3` train dates, and `h1_folds_4_6` validation dates are secondary. Empty `benchmark` marks a per-model metric rather than a fake zero comparison.
+- **Actual on-disk columns:** `configuration`, `population`, `horizon_minutes`, `model`, `benchmark`, `metric`, `value`, `difference`, `naive_se`, `clustered_se`, `design_effect`, `meaningful`, `n`, `n_clusters`, `verdict`.
+- **Units / status:** MSE and paired squared-loss differences/SEs are squared log-volatility units; MAE and mean residual are log-volatility units; R², design effect, and flags are unitless; counts are rows/days. The V verdict uses `close_date`-clustered SE. **Aggregate future-target/outcome-derived evaluation; unsafe as a model or live input.** H1 folds 5–6 consume earlier validation targets and outcomes.
+
+### Probability comparison and aggregate oracle diagnostic
+
+- **Path / purpose:** `data/models/har_probability_comparison.parquet`; controlled sigma-swap scores, paired Brier comparisons, bucket diagnostics, P verdicts, and oracle headroom aggregates.
+- **Rows / unique key / population:** 58; `(configuration, comparison_window, horizon_minutes, breakdown, breakdown_value, metric)`. Configurations are `h2_train_only` primary, diagnostic `h2_n1_control`, secondary `h1_walk_forward_vs_b1`, and `oracle_headroom` aggregate only. H2 full validation common T-10/T-5 `n=1,685/1,649`; oracle target-bearing subsets `n=1,644/1,588`. Breakdowns are `overall`, frozen Stage 0 `abs_z`, and seven `price_bucket` cells.
+- **Actual on-disk columns:** `configuration`, `comparison_window`, `horizon_minutes`, `breakdown`, `breakdown_value`, `metric`, `model_value`, `stage0_value`, `market_value`, `oracle_value`, `difference`, `paired_se`, `meaningful`, `n`, `thin`, `verdict`, `numerator`, `denominator`, `unstable`.
+- **Units / status:** Brier and paired difference/SE, market-gap numerator/denominator, and oracle gaps are probability-squared units; log loss is unitless nats; AUC, ECE, closure/headroom fractions, and flags are unitless; `n` is rows. **Outcome-derived validation aggregate and partly FUTURE_ONLY-derived through oracle summary; unsafe as a live/model input.** Oracle appears only as aggregate metric rows, never a row-level probability artifact. The P verdict uses inherited paired *per-row* SE, not the volatility clustered SE.
+
+### HAR residual summary
+
+- **Path / purpose:** `data/models/har_residual_summary.parquet`; pre-registered H1 residual diagnostics for the Day 14 gate, without any per-row residual artifact.
+- **Rows / unique key / population:** 138; `(population, horizon_minutes, cut, cell)`. Populations are target-bearing `all_oof` (T-10 `n=3,473`, T-5 `n=3,380`), `train_folds_1_3`, and `validation_folds_4_6`. Cuts cover UTC hour, weekday/weekend, frozen trailing-volatility tercile, frozen H1 forecast decile, fold, and within-day lag one.
+- **Actual on-disk columns:** `population`, `horizon_minutes`, `cut`, `cell`, `n`, `mean_residual`, `naive_se`, `clustered_se`, `n_clusters`, `design_effect`, `thin`, `significant_clustered`, `structure`, `train_side_qualifies`, `validation_side_qualifies`, `cross_boundary_same_sign`, `forecast_bin_lower`, `forecast_bin_upper`, `lag1_autocorrelation`, `n_pairs`, `n_days_contributing`.
+- **Units / status:** Residual is `fwd_log_rv − log_rv_har`, in log annualized volatility; residual means, SEs, and forecast-bin edges share log-volatility units; autocorrelation, design effect, and flags are unitless; `n`, clusters, pairs, and days are counts. Lag-one rows put correlation in `lag1_autocorrelation`, not `mean_residual`. **Aggregate FUTURE_ONLY-target-derived outcome diagnostic; unsafe as a feature or live/model input.** Structure flags never authorize a cut as a feature/filter.
+
+### Day 13 diagnostic plots
+
+- **`data/models/plots/har_vs_stage0_reliability.png`:** H2 validation common T-10/T-5 reliability for HAR-fed Stage 0, frozen Stage 0, and market mid, with Wilson intervals and ideal-calibration diagonal; descriptive probability/outcome plot, not a verdict rule.
+- **`data/models/plots/har_residuals_by_regime.png`:** Target-bearing H1 train-fold 1–3 versus validation-fold 4–6 residual means by UTC hour, weekday/weekend, and frozen trailing-volatility tercile, with ±2 day-clustered SE and zero line.
+- **`data/models/plots/har_residuals_vs_forecast.png`:** Same target-bearing H1 train/validation populations by frozen HAR forecast decile, with ±2 day-clustered SE and zero line. These two plots visualize future-target-derived residuals; neither supplies a model feature or overrides the mechanical structure flag.

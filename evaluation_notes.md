@@ -794,3 +794,175 @@ The primary Tier-2 fixed-bar comparison used the frozen Stage 0 1.2 bps threshol
 The separately labelled **secondary** `model_own_bar` used the additive model-own basis-sensitivity plus M2 ECE threshold. It made 762 validation trades, net P&L −$19.556200, net/trade −$0.025664304; it does not determine the primary verdict. M1 validation folds 4–6 are context only: folds 5–6 fitted on earlier validation outcomes and do not replace the M2 train-only protocol-identical comparison. The deterministic read-only rerun reproduced all 14 selected C values, coefficients, scalers, and predictions exactly. No parameter changed after validation outcomes. Full results and the four fingerprints are in `model_notes.md` §3.3.
 
 **Test-set status (2026-09-25): the test split was not read on Day 12.** Day 12 is frozen.
+
+## Day 13 HAR-RV Protocol
+
+This protocol is frozen at Day 13 Step 1.2, before any forward-volatility target value is built or inspected, any HAR/N1 fit, or any Day 13 score. Day 13 uses only the Day 9 common population, separately by horizon, on the frozen `close_date` train (2026-05-26 through 2026-07-19) and validation (2026-07-20 through 2026-08-09) splits. The test split must not be loaded; no forward target may be computed for a test row. The frozen train-fitted Stage 0 Platt probability using `5min_ewma_vol` is the baseline of record.
+
+### 1. Inherited rules and sequence
+
+Reuse unchanged `FROZEN_FOLDS` and the six expanding Day 8 folds; the Day 9 common population (9,549 train rows: 4,792 T-10 / 4,757 T-5; 3,334 validation rows: 1,685 / 1,649); `PLATT_CLIP = 1e-6`; the Day 9/12 paired per-row 2-SE Brier rule; and Day 12's B1 rows after verification of prediction fingerprint `78a0e3cda08734a778d7a3c49fa7cbe5156f71a0f7d1bc93df404903a1a36512`. The frozen Day 10 threshold composition, Day 11 one-contract execution/accounting and one-position-per-market rules, and Day 12 paired economic comparison remain in force for the deferred economic comparison. No Day 7–12 script or artifact is changed.
+
+Save this protocol before Step 1.3 builds a target. Quarantine and prove the target before model code runs. Write and fingerprint forecasts and HAR-fed probabilities before scoring either. Read coefficients before volatility scoring, and record the volatility verdict before probability scoring. Validation outcomes cannot change these choices.
+
+### 2. Forward target and quarantine
+
+For each row, `fwd_rv` is annualized **simple** realized volatility of one-second cross-exchange VWAP-proxy log returns labelled in `[decision_time, close_time)`: `std(ddof=1) * sqrt(31,536,000)`. The first return uses the decision-time spot from the prior second; the close-second price is excluded. Apply the existing frozen forward fill of at most 10 seconds. Coverage must be at least 80% of the expected 300 returns at T-5 or 600 at T-10; otherwise the target is null. Define `fwd_log_rv = ln(fwd_rv)` where `fwd_rv` is non-null. There is no imputation, no coverage relaxation, and no use of `fwd_log_return` or `expiration_value` to construct this target.
+
+Every forward target value or diagnostic column is `FUTURE_ONLY`, prefixed `fwd_`, and lives only in `data/targets/forward_vol_target.parquet`. It is loaded as a separate target lookup and never enters a design matrix. A T-5 row's trailing features must never be joined onto the same market's T-10 design: the T-5 trailing five-minute window overlaps the T-10 forward target.
+
+### 3. Volatility models and benchmarks
+
+Fit separately per horizon with an intercept and `numpy.linalg.lstsq`. Do not standardize, regularize, weight, or apply a Jensen/lognormal correction. All logs below are natural logs of positive, annualized volatility features from the row's own horizon.
+
+| Name | Frozen log-volatility forecast | Role |
+| --- | --- | --- |
+| HAR | `fwd_log_rv ~ 1 + ln 5min_vol + ln 1hr_vol + ln 24hr_vol` | Multi-horizon model |
+| N1 | `fwd_log_rv ~ 1 + ln 5min_ewma_vol` | Fitted level/slope control |
+| Naive-S0 | `ln 5min_ewma_vol` | Unfitted **primary benchmark**; Stage 0's actual sigma assumption |
+| Naive-15 | `ln 15min_vol` | Unfitted roadmap benchmark |
+
+OLS fit rows are fit-window Day 9 common rows with non-null `fwd_log_rv`. Forecast rows remain **every** common row in each fit and score window, including rows with a null forward target. A null target only removes its row from OLS fitting and forward-volatility scoring; it never removes the row from the probability population. No input is joined from another horizon.
+
+### 4. Probability feed-through and configurations
+
+For HAR and N1, set `sigma_hat = exp(log-vol forecast)` and call the existing `stage0_probability(log_moneyness, sigma_hat, T_years)` for the raw probability. Fit a separate horizon-specific Platt map for each forecast using existing `fit_platt` and `platt_feature`, then score with `stable_sigmoid(a + b * platt_feature(p_raw))`. The Platt fit uses **all** fit-window common rows and their outcomes, including rows whose own forward target is null; their log-vol forecasts still exist. The OLS forecast fed into this Platt fit is in-sample on OLS fit rows, a known asymmetry analogous to Stage 0's train-in-sample calibrator.
+
+- **H2 train-only is primary for both verdicts:** fit HAR/N1 on train target-bearing common rows, fit their Platt maps on all train common rows, and score all 3,334 validation common rows. Compare with the frozen train-fitted Stage 0 Platt probability on exactly those rows.
+- **H1 walk-forward is secondary:** use the unchanged six `FROZEN_FOLDS` and score all 7,012 out-of-fold common rows (3,531 T-10 / 3,481 T-5). Compare with the frozen Day 12 B1 walk-forward Stage 0 rows on identical keys. Folds 5–6 consume earlier validation **forward volatility and outcomes** in their expanding fits; H1 cannot replace H2's primary verdicts.
+
+### 5. Plumbing proofs before trusting HAR-fed probabilities
+
+Run the sigma-replacement plumbing path before writing a HAR-fed probability. Achieved maximum absolute errors remain blank until Step 2.1. The numerical tolerances below are frozen now from the Day 13 plan and Day 12 precedent; failure stops the later fit/score sequence for investigation.
+
+| Proof | Maximum allowed error | Achieved error |
+| --- | ---: | --- |
+| `sigma := 5min_ewma_vol` raw feed-through versus saved `p_5min_ewma_vol` | `1e-12` | `0` |
+| H2 plumbing versus frozen train-Platt Stage 0 probability | `1e-10` | `2.2204460492503131e-16` |
+| H1 plumbing versus fingerprint-verified Day 12 B1 probability | `1e-8` | `1.5254186802593495e-12` |
+| `numpy.linalg.lstsq` coefficients versus an independent OLS solution, on every HAR and N1 fit | `1e-10` | `0` maximum |
+
+### 6. Forward-volatility scoring and V verdict
+
+The **primary** scoring population is H2 validation common rows with non-null `fwd_log_rv`; the **secondary** population is H1 out-of-fold common rows with non-null target, separately identifying train-date folds 1–3 and validation folds 4–6. Primary loss is squared error in log-volatility. For each horizon and each benchmark, define the paired row loss differential `d_i = (HAR forecast_i - fwd_log_rv_i)^2 - (benchmark forecast_i - fwd_log_rv_i)^2`. Report `mean(d)` with `clustered_mean_se(d, close_date)`. A difference is meaningful iff `abs(mean(d)) > 2 * clustered SE`; a negative difference favors HAR. Report the naive per-row SE and design effect, but neither decides the verdict. Make HAR versus **Naive-S0** the primary comparison; also compare HAR versus N1 and Naive-15 on identical target-bearing keys.
+
+Report MSE, MAE, mean residual (`fwd_log_rv - forecast`), and `R²_vs_naive = 1 - MSE_model / MSE_Naive-S0`. Also report R² against the fit-window target mean, explicitly labelled **inflated by regime shift; not a skill measure**. Do not substitute the scored-window mean for the fit-window reference.
+
+Assign a V category **per horizon on H2 validation**, checking V4 first:
+
+- **V4 — worse:** HAR is meaningfully worse than Naive-S0.
+- **V1 — structure adds skill:** HAR is meaningfully better than Naive-S0 **and** meaningfully better than N1.
+- **V2 — level/scale correction only:** HAR is meaningfully better than Naive-S0 but not meaningfully better than N1.
+- **V3 — no meaningful difference:** “Stage 0's trailing-σ assumption was already adequate as a volatility forecast.”
+
+### 7. Probability comparison and P verdict
+
+The **primary** comparison is H2 HAR-fed Stage 0 against the frozen train-fitted Stage 0 on the exact 3,334 validation common rows. Per horizon and pooled by row count, use the inherited Day 9/12 paired per-row rule on `d_i = (p_HAR,i - y_i)^2 - (p_S0,i - y_i)^2`, with `SE = sd(d) / sqrt(n)` and meaningful iff `abs(mean(d)) > 2 * SE`. A negative difference favors HAR. Log loss, AUC, and 10-decile ECE are secondary. Report market-mid Brier and market-gap closure `(Brier_S0 - Brier_H2) / (Brier_S0 - Brier_market)` on the same rows.
+
+Break down the paired probability scores using **Stage 0's** `abs(z_5min_ewma_vol)` buckets `[0, 0.25)`, `[0.25, 0.5)`, `[0.5, 1.0)`, `[1.0, infinity)` and the frozen seven `quote_mid` price buckets `[0, 0.10)`, `[0.10, 0.25)`, `[0.25, 0.40)`, `[0.40, 0.60)`, `[0.60, 0.75)`, `[0.75, 0.90)`, `[0.90, 1.00]`. These definitions keep row sets identical between models. Label cells with fewer than 30 rows **thin**. Score H1 versus B1 secondarily on all 7,012 rows and separately on validation folds 4–6. N1-fed H2 versus Stage 0 is diagnostic only.
+
+Assign the **H2 probability-only** category, checking P4 first:
+
+- **P4 — worse:** Brier is meaningfully worse at either horizon.
+- **P1 — improves:** Brier is meaningfully better at both horizons.
+- **P2 — mixed:** Brier is meaningfully better at exactly one horizon and not meaningfully worse at the other; a pooled result cannot upgrade P2.
+- **P3 — no meaningful difference:** “Forecast σ did not improve Stage 0's probabilities; Stage 0 remains the baseline of record.”
+
+Ties go to Stage 0. Report an H1 category separately with the folds 5–6 caveat. No economic result enters a P category.
+
+### 8. Oracle headroom diagnostic
+
+Feed through with `sigma := fwd_rv`; fit its Platt calibrator on train common rows with a non-null forward target, then score validation common rows with a non-null target. Re-score Stage 0 and H2 on **that exact same validation subset**. Per horizon, report both Brier gaps and `headroom captured = (Brier_S0 - Brier_H2) / (Brier_S0 - Brier_oracle)`, flagging an unstable ratio if the denominator is near zero. The oracle is diagnostic only: it is never written as a per-row probability artifact, never thresholded, never traded, and never treated as a model.
+
+### 9. Residual analysis and frozen terciles
+
+Use H1 out-of-fold rows with non-null target; define residual `fwd_log_rv - log_rv_har` and report the validation subset separately. Report per horizon by UTC decision-hour blocks `00–05 / 06–11 / 12–17 / 18–23`; Saturday/Sunday UTC versus weekday; trailing `5min_ewma_vol` terciles; HAR forecast deciles; and fold. Compute lag-1 residual autocorrelation within each horizon and `close_date`, in `decision_time` order, never across a date boundary. Mean-residual cells use day-clustered SEs. Forecast deciles are equal-frequency bins of the H1 HAR log-vol forecast within each horizon's target-bearing out-of-fold population, then reused unchanged for its validation subset.
+
+The trailing-volatility tercile edges below were computed **now, before any forward target or residual exists**, using only `5min_ewma_vol` from `market_features.parquet` joined by `(ticker, horizon_minutes, close_date)` to `is_common` keys from `derived_features.parquet`. Both reads were column-projected and Parquet-filtered to **train** / `close_date <= 2026-07-19`; the resulting population is exactly 9,549 Day 9 train common rows. Edges are pandas linear-interpolation quantiles at `1/3` and `2/3`, computed separately by horizon. Freeze bins as `[0, lower)`, `[lower, upper)`, and `[upper, infinity)`; an observation exactly on an edge enters the higher bin.
+
+| Horizon | Train common feature rows | Lower edge (`1/3`) | Upper edge (`2/3`) |
+| --- | ---: | ---: | ---: |
+| T-10 | 4,792 | `0.6337964396166403` | `0.8837207863551418` |
+| T-5 | 4,757 | `0.623421011561805` | `0.8606540123954035` |
+
+Call a residual cut **structure** only for a non-thin cell (`n >= 30`) with `abs(mean residual) > 2 * day-clustered SE` **and the same sign** in comparable train-date folds 1–3 and validation folds 4–6. Fold cells and lag-1 autocorrelation are descriptive; a structure flag needs a comparable cell on both sides of the boundary. No residual cut may become a new feature, filter, or model change during Day 13.
+
+### 10. OFI decision, pre-registered
+
+Choose one of these three categories after the probability and residual diagnostics, and record the evidence and data-availability facts:
+
+1. **Remain deferred.** No evidence that remaining probability error is directional rather than sigma or basis, or the evidence is not robust across the train/validation boundary.
+2. **Reopen as a scoped post-Day-17 experiment.** Evidence points to a directional gap, such as small oracle headroom, a persistent market gap, and low-`abs(z)` concentration. This requires a **new Kraken + Crypto.com backfill with trade side retained**; Bullish is excluded for the roadmap's coverage-discontinuity reason. The repository has no retained BTC trade-side data, so OFI does not reopen for free.
+3. **Reopen within Days 14–16.** This is not realistically available: it needs a multi-day backfill and a new feature with changing coverage shortly before the one-shot test. Such a schedule change would require written justification.
+
+HAR residuals concern volatility magnitude; they are not by themselves evidence of directional OFI. The OFI decision must also consider the oracle, persistent market gap, low-`abs(z)` probability errors, and the Day 11 market-fair P&L reference.
+
+### 11. Economic comparison frozen for later execution
+
+Freeze the Day 12 §10–11 comparison for H2 HAR-fed probabilities now; **do not run it in Step 1.2**. The primary bar is Stage 0's fixed **1.2 bps** `data/execution/edge_threshold.parquet` through unchanged `generic_select`, against the frozen 719-trade Stage 0 validation book. The secondary model-own bar uses `required_net_edge = basis_term + model_error_term` under the frozen Day 10 composition and seven price buckets: the basis term is the model's own ±1.2 bps spot-perturbation sensitivity, and the model-error term is H2 validation 10-decile ECE. Perturbing basis changes `log_moneyness` only; forecast sigma is spot-independent and must show exactly zero spot sensitivity. Apply the inherited executable prices, fee, stale-quote, one-contract, earliest-clearing-row, settlement, and accounting rules without rewriting them.
+
+The statistic is HAR-fed minus frozen Stage 0 **daily total net P&L** over all 21 validation `close_date` days, including zero-trade days, reported as the mean paired daily difference ± `2 * sd(daily differences) / sqrt(21)`. Report the inherited book counts, fees, and Day 11 clustered intervals as context. Execution is Day 14's four-way comparison unless optional O1 is later run. **Do not add validation ledger entry 13 unless this comparison actually runs.**
+
+### 12. Determinism, no iteration, and validation-query ledger
+
+A second run must reproduce every coefficient to `1e-12` and both forecast/probability fingerprints exactly. After any score is seen, no input window, transform, target definition, coverage rule, benchmark, population, metric, or verdict category/rule may change. Only a bug violating an already-written invariant may be fixed; document its justification and before/after behavior later in `model_notes.md`. Do not change a negative HAR coefficient by dropping a horizon.
+
+Declare the following Day 13 validation uses now; entries 1–9 above remain untouched. H1 entries 10 and 11 carry the caveat that folds 5–6 consume validation forward volatility **and** outcomes.
+
+| # | Day | Validation outcome use | Purpose | Classification / caveat |
+| --- | --- | --- | --- | --- |
+| 10 | 13 | HAR, N1, and naive forward-volatility losses against validation forward realized volatility | Decision support — Day 14 gate input | H2 primary; H1 folds 5–6 consume validation forward volatility and outcomes |
+| 11 | 13 | HAR-fed and N1-fed Stage 0 probability scores on validation | Decision support — whether HAR-fed Stage 0 is a candidate in Day 14's comparison | H2 primary; H1 folds 5–6 consume validation forward volatility and outcomes |
+| 12 | 13 | Oracle headroom and residual analysis on validation | Diagnostic — no parameter chosen | Oracle never becomes a model or per-row artifact |
+
+### 13. Unresolved values reserved for Steps 1.3 and 2.1
+
+These are placeholders for later **measurements**, not open protocol choices. Step 1.3 fills target counts from the builder's authoritative output; Step 2.1 fills fit counts, proof errors above, and fingerprints before any score. Planning-time forward-window observation counts do not replace builder-verified counts.
+
+| Measurement | T-10 | T-5 | Fill at |
+| --- | --- | --- | --- |
+| Train common null `fwd_rv` / `fwd_log_rv` rows | **27** | **62** | Step 1.3 |
+| Validation common null `fwd_rv` / `fwd_log_rv` rows | **41** | **61** | Step 1.3 |
+| H2 HAR OLS fit rows after null-target exclusion | **4,765** | **4,695** | Step 2.1 |
+| H1 HAR OLS fit rows after null-target exclusion, each fold | F1 **2,936**; F2 **3,573**; F3 **4,184**; F4 **4,765**; F5 **5,310**; F6 **5,891** | F1 **2,903**; F2 **3,529**; F3 **4,125**; F4 **4,695**; F5 **5,226**; F6 **5,797** | Step 2.1 |
+
+| Fingerprint | Value | Fill at |
+| --- | --- | --- |
+| Forecast table SHA-256 | `d2b1ea6776013e3d3ee5582c0bfa89465ce7c87ee07ee0b31aa472eeaa50acc9` | Step 2.1 |
+| HAR-fed probability table SHA-256 | `e864a6377c8d520b04eae3dfb6664feaacdb5c35cb9708a6c0755b741d17fa0b` | Step 2.1 |
+
+**Step 1.2 status:** no forward target has been built or inspected, no HAR/N1 model has been fitted, no validation metric or probability score has been computed, and no test-period row has been read. Step 1.3 has not started.
+
+## Day 13 HAR-RV Result
+
+This result section records the completed, pre-registered validation uses. The Day 13 protocol and prior ledger entries remain unchanged.
+
+| # | Day | Validation outcome use | Purpose | Classification / caveat |
+| --- | --- | --- | --- | --- |
+| 10 | 13 | HAR, N1, and naive forward-volatility losses against validation forward realized volatility | Decision support — Day 14 gate input | H2 primary; H1 folds 5–6 consume validation forward volatility and outcomes |
+| 11 | 13 | HAR-fed and N1-fed Stage 0 probability scores on validation | Decision support — whether HAR-fed Stage 0 is a candidate in Day 14's comparison | H2 primary; H1 folds 5–6 consume validation forward volatility and outcomes |
+| 12 | 13 | Oracle headroom and residual analysis on validation | Diagnostic — no parameter chosen | Oracle never becomes a model or per-row artifact |
+
+Frozen identities: forecast fingerprint `d2b1ea6776013e3d3ee5582c0bfa89465ce7c87ee07ee0b31aa472eeaa50acc9`; HAR-fed probability fingerprint `e864a6377c8d520b04eae3dfb6664feaacdb5c35cb9708a6c0755b741d17fa0b`.
+
+| Primary H2 validation target-bearing population | Horizon | n | HAR MSE | Naive-S0 MSE | N1 MSE | HAR−Naive-S0 paired loss; day-clustered SE | HAR−N1 paired loss; day-clustered SE | Official V verdict |
+| --- | --- | ---: | ---: | ---: | ---: | --- | --- | --- |
+| H2 train-only | T-10 | 1,644 | 0.058826112 | 0.089998530 | 0.091657356 | −0.031172418; 0.004112423 | −0.032831244; 0.005616921 | **V1 — structure adds skill** |
+| H2 train-only | T-5 | 1,588 | 0.075463723 | 0.099324391 | 0.096687468 | −0.023860668; 0.004099138 | −0.021223745; 0.004020634 | **V1 — structure adds skill** |
+
+Both V1 verdicts use the frozen close-date-clustered two-SE rule: HAR meaningfully beat Naive-S0 and N1 at each horizon. They concern forward-volatility skill only.
+
+| Primary H2 validation common probability population | Horizon | n | HAR Brier | Frozen Stage 0 Brier | HAR−Stage 0 paired difference; per-row SE | Meaningful under inherited two-SE rule |
+| --- | --- | ---: | ---: | ---: | --- | --- |
+| H2 train-only | T-10 | 1,685 | 0.189033084 | 0.189792806 | −0.000759722; 0.000603548 | No |
+| H2 train-only | T-5 | 1,649 | 0.117061648 | 0.116474357 | +0.000587291; 0.000476165 | No |
+
+**H2 P3 — no meaningful difference:** “Forecast σ did not improve Stage 0's probabilities; Stage 0 remains the baseline of record.” The pooled H2 validation common result (`n=3,334`) was likewise not meaningful; the pooled result and secondary metrics cannot upgrade P3. The volatility and probability verdict rules remain separate.
+
+**Oracle diagnostic only — not a model:** on the target-bearing H2 validation subsets, T-10 (`n=1,644`) had raw Stage 0-minus-oracle Brier gap `0.002185453` and HAR headroom captured `+0.344385`; T-5 (`n=1,588`) had raw gap `0.000443444` and captured fraction `−1.098620`. The small T-5 denominator makes that ratio sensitive; the raw gap is the primary context. No per-row oracle probability artifact exists.
+
+**OFI verdict: Reopen as a scoped post-Day-17 experiment.** It requires a new Kraken + Crypto.com trade-side backfill, with Bullish excluded, and does not modify Days 14–17 or validate OFI.
+
+The HAR-fed economic-comparison specification was frozen on Day 13; execution was deferred to Day 14. No optional O1 economic comparison ran and **no validation ledger entry 13** is added. Detailed target, proof, coefficient, forecast, probability, residual, and OFI readings are in `# Day 13 — HAR-RV Forward-Volatility Notes` in `model_notes.md`.
+
+Test-set status (Day 13): the test split was not read on Day 13.
