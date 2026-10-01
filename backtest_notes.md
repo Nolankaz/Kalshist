@@ -1,5 +1,8 @@
 # Stage 0 Tier-2 Backtest Notes
 
+This chronological note covers the Tier-2 Stage 0 backtest and its evaluation record.
+Pipeline stage: historical trade selection and settlement accounting. Return to the [README](README.md) or [architecture map](ARCHITECTURE.md) for navigation; internal session headings are retained for provenance.
+
 ## Day 11 — Section 2.2: Ordered train and validation evaluation
 
 ### Frozen evaluation state

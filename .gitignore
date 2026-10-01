@@ -7,6 +7,12 @@
 
 # Python cache
 __pycache__/
+.ipynb_checkpoints/
+
+# Local editor and OS files
+.DS_Store
+.vscode/
+.idea/
 
 # Project plan files
 plans/

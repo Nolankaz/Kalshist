@@ -1,5 +1,8 @@
 # Day 12 Model Notes
 
+This chronological note covers logistic-model comparison and the later HAR-RV forecasting and probability work.
+Pipeline stages: fitted-model comparison and forward-volatility analysis. Return to the [README](README.md) or [architecture map](ARCHITECTURE.md) for navigation; existing session titles are retained for provenance.
+
 ## Day 12 §2.3 — Coefficients Against Pre-Registered Hypotheses
 
 ### Integrity and interpretation basis

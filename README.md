@@ -1,104 +1,149 @@
 # Kalshist
 
-Kalshist is a Python research and data pipeline for Kalshi's `KXBTC15M` Bitcoin prediction markets. It builds a local, timestamp-aligned dataset of settled markets, historical Kalshi quotes, live top-of-book observations, and BTC spot-market data for later probability modeling and trading-strategy evaluation.
+Kalshist is an end-to-end Python research pipeline studying whether BTC volatility models can produce calibrated, tradable probabilities for Kalshi's 15-minute Bitcoin markets.
 
-The project deliberately separates two questions:
+**Status:** The pipeline has reached forward-volatility forecasting and model comparison on validation. Strategy-level analysis, execution validation, and the one-shot locked test evaluation remain.
 
-- **Probability-model evaluation:** Are predicted YES probabilities calibrated and informative relative to settled outcomes?
-- **Trading-strategy evaluation:** Could those predictions have been traded after accounting for available quotes, fees, size, and execution constraints?
+## Research question and market
 
-Data collection and validation are complete through Day 5. Modeling and strategy backtesting have not started, so the repository makes no claim of predictive edge or profitability.
+Each `KXBTC15M` contract asks whether BTC will finish above a strike set around the market's opening reference price. Kalshi's official YES/NO settlement is the outcome of record; where both numeric fields exist, YES corresponds to an expiration value strictly above the strike. The project estimates YES probability at **T-10** and **T-5**, meaning 10 and 5 minutes before market close.
 
-## Data Pipeline
+The questions are: **Are the probabilities calibrated against settled outcomes?** And **could a probability difference be traded after quoted spreads and fees?** A better forecast or a model-market disagreement alone does not answer the trading question. See [schema.md](schema.md), [feature_table_notes.md](feature_table_notes.md), and [evaluation_notes.md](evaluation_notes.md).
 
-The current pipeline collects and validates:
+## Pipeline
 
-- Settled `KXBTC15M` market metadata, including market windows, strikes, BTC expiration values, and YES/NO outcomes.
-- Historical one-minute Kalshi candlesticks containing bid, ask, and trade-price OHLC values. These are partitioned by market close date.
-- Live Kalshi snapshots sampled roughly every 10 seconds, including top-of-book bid/ask prices and actual bid/ask sizes.
-- One-second BTC trade aggregates from Bullish, Kraken, and Crypto.com, with VWAP price, volume, and trade count.
-- Leakage-safe realized-volatility features over 5-minute through 24-hour windows, using data strictly before each feature timestamp.
-- Basis-risk samples used to compare exchange-derived BTC reference prices around Kalshi settlement times.
+```mermaid
+flowchart TD
+    M["Settled Kalshi markets"] --> N["Normalization and local storage"]
+    Q["Kalshi historical quotes<br/>and live snapshots"] --> N
+    X["BTC trades from selected<br/>public exchanges"] --> N
+    N --> B["Settlement proxy and<br/>basis-risk analysis"]
+    N --> V["Leakage-safe realized volatility"]
+    N --> F["Point-in-time market features"]
+    V --> F
+    B --> F
+    F --> S["Frozen chronological split"]
+    S --> R["Train and validation research"]
+    S --> T["Locked test split<br/>one-shot evaluation pending"]
+    R --> P["Stage 0 probability model"]
+    P --> C["Sigma selection and<br/>train-fitted Platt calibration"]
+    R --> E["Fees, spreads, and<br/>edge-threshold model"]
+    B --> E
+    C --> D["Outcome-free trade selection"]
+    E --> D
+    D --> A["Tier-2 settlement accounting"]
+    C --> L["Fitted-model comparisons:<br/>logistic correction and HAR-RV"]
+    A --> L
+```
 
-All generated datasets are stored locally as daily Parquet files under `data/`. Raw and derived data are intentionally ignored by Git and must be generated locally.
+The test branch is locked: it supplies no results or model choices at this stage.
 
-See [schema.md](schema.md) for exact columns and UTC timestamp semantics, [exchange_notes.md](exchange_notes.md) for exchange selection, [feature_notes.md](feature_notes.md) for realized-volatility methodology, and [quote_notes.md](quote_notes.md) for Kalshi quote behavior and coverage.
+## Data overview
 
-## Day 5 Validation
+The model-ready cohort covers **8,591 eligible settled markets** and **17,182 decision rows** across T-10 and T-5, with market close dates from **2026-05-26 through 2026-08-24**. These are structural cohort counts and dates, not test outcomes. [Feature-table population](feature_table_notes.md) and [split definition](evaluation_notes.md) record the assertions.
 
-Historical quote validation covers 8,597 settled markets across 91 close dates:
+Inputs include settled Kalshi market metadata, historical quote candles, live top-of-book snapshots, and BTC trade data from Bullish, Kraken, and Crypto.com. The exchange-derived BTC reference supports volatility features and a separate settlement-proxy/basis-risk check; Kalshi's settlement remains authoritative for contract payoff. See [exchange notes](exchange_notes.md) and [quote notes](quote_notes.md).
 
-- 8,591 markets have at least one candle; 8,586 have all 15 expected one-minute candles.
-- 128,820 quote rows were collected: 48,066 from the historical endpoint and 80,754 from the series endpoint.
-- There were zero bid/ask close-ordering violations, zero non-null price values outside `[0, 1]`, and zero entirely missing close dates.
-- Six markets have no returned candles, and five have partial coverage. These gaps were reproduced directly against Kalshi's API and were not filled or synthesized.
+Research datasets and most derived artifacts are stored locally under `data/` and are intentionally not committed. The repository contains code, research records, selected plots, and small public-metadata snapshots.
 
-Historical candlesticks do not contain bid size, ask size, or full order-book depth. They support quote-aware analysis but cannot establish whether an arbitrary quantity could have filled. The live recorder captures top-of-book sizes for forward testing, but it does not capture full depth.
+## Methodology and evaluation integrity
 
-## Evaluation Tiers
+- Realized-volatility windows use observations strictly before each decision timestamp; missing-data coverage is checked rather than silently filled across long gaps. [Feature notes](feature_notes.md)
+- The feature table separates permitted inputs from targets and `FUTURE_ONLY` columns. Safe-column assertions guard model and trade-selection inputs. [Feature-table notes](feature_table_notes.md), [schema](schema.md)
+- The split is chronological by market `close_date`, with asserted row counts and no ticker shared across splits. The T-10 and T-5 rows of one market stay together. [Evaluation design](evaluation_notes.md)
+- The test split is reserved for one outcome-derived evaluation after the strategy and rules are frozen. Its outcomes have not been read for research results. [Evaluation design](evaluation_notes.md)
+- Sigma selection, calibration, thresholds, fitted-model comparisons, and permitted validation uses follow recorded protocols and a validation-query ledger. Validation has informed choices, so it is not a pristine untouched holdout. [Evaluation design](evaluation_notes.md)
+- Trade decisions are selected and fingerprinted before settlement outcomes are joined. Economic uncertainty is assessed across trading days rather than treating adjacent trades as independent. [Backtest notes](backtest_notes.md), [model notes](model_notes.md)
 
-Every future P&L result is intended to carry one of these labels:
+## Evaluation tiers
 
-- **Tier 1: probability-only.** No market prices are used.
-- **Tier 2: quote-aware/top-of-book.** Historical quotes are used, but historical size is unavailable.
-- **Tier 3: depth-aware/execution-aware.** Available size and execution constraints are modeled.
+**Tier 1** evaluates probabilities against outcomes without trading prices. **Tier 2** is a historical, quote-aware simulation using recorded top-of-book prices, modeled fees, and settlement accounting; it has no historical depth or fill-size proof. **Tier 3** would require execution evidence for size, fills, and latency. Current P&L results are **Tier 2**. [Quote notes](quote_notes.md), [execution notes](execution_notes.md)
 
-An unlabeled P&L figure is not considered a complete project result.
+## Results so far
 
-## Repository Structure
+All findings below concern train or validation research, not the locked test split.
+
+| Stage | Finding and interpretation | Record |
+| --- | --- | --- |
+| Settlement proxy | In the sampled aggregate check, the exchange-derived BTC proxy was sufficiently close for feature research, but imperfect and distinct from Kalshi's official reference. | [Exchange notes](exchange_notes.md) |
+| Stage 0 selection and calibration | `5min_ewma_vol` was selected. On validation common rows, train-fitted Platt calibration improved Brier score and log loss at both decision horizons; the market quote mid still had lower Brier score at both. | [Calibration notes](calibration_notes.md) |
+| Basis sensitivity | Plausible BTC-reference differences can move calibrated probabilities by amounts economically meaningful relative to the model-market gap. | [Calibration notes](calibration_notes.md) |
+| Stage 0 historical trading | **No Tier-2 evidence of edge either way; not established.** The primary validation net P&L estimate was negative, and its traded-day-clustered interval included zero. | [Backtest notes](backtest_notes.md) |
+| Logistic correction | **Category C — no meaningful difference; did not beat Stage 0.** The frozen train-only comparison did not meet its probability or paired economic improvement rule. | [Model notes](model_notes.md) |
+| HAR-RV forecast and probability swap | HAR added forward-volatility forecast skill at both horizons under the frozen validation rule (**V1/V1**). Feeding those forecasts into Stage 0 did **not** meaningfully improve its probabilities (**P3**); Stage 0 remains the baseline of record. | [Model notes](model_notes.md) |
+
+The simple, calibrated Stage 0 baseline has not been meaningfully beaten on validation. Better volatility forecasts did not automatically yield better event probabilities, and the market mid had lower Brier scores than the tested models on their reported common rows. No tradable edge has been established. The locked test period remains unread.
+
+## Figures
+
+![Stage 0 raw and train-fitted Platt reliability on validation common rows at T-10 and T-5](data/models/plots/stage0_5min_ewma_vol_platt_reliability_validation.png)
+
+*Validation common rows: raw Stage 0 versus train-fitted Platt reliability at both decision horizons. Error bars show uncertainty around observed YES frequencies.*
+
+![Stage 0 cumulative historical Tier-2 P&L on train and validation](data/backtest/plots/stage0_cumulative_net_pnl.png)
+
+*Primary Stage 0 Tier-2 simulation on train and validation: realized, model-expected, and market-fair cumulative P&L. These curves do not represent live trading.*
+
+![HAR-fed Stage 0, frozen Stage 0, and market-mid reliability on validation](data/models/plots/har_vs_stage0_reliability.png)
+
+*Validation common rows: train-only HAR-fed Stage 0, frozen Stage 0, and market-mid reliability at T-10 and T-5. The probability verdict uses the recorded paired Brier rule, not a visual reading of this plot.*
+
+## Simulated versus real
+
+**No live orders were placed and no real money was traded.** Reported trading P&L is historical Tier-2 simulation. It assumes one-contract taker entry at recorded top-of-book quotes, applies the frozen fee model, and holds each position to Kalshi settlement. Historical depth, fillable size, latency, and realized slippage are not modeled. A live quote recorder has captured top-of-book snapshots for later execution-validation work; those observations are not live fills. [Execution notes](execution_notes.md), [backtest notes](backtest_notes.md)
+
+## Limitations
+
+- Historical quote candles lack displayed size and full order-book depth; Tier-3 execution validation is still pending. [Quote notes](quote_notes.md)
+- A small number of markets have reproducible upstream candle gaps; missing candles were not synthesized. [Quote notes](quote_notes.md)
+- The exchange-derived settlement proxy is not Kalshi's official settlement index. [Exchange notes](exchange_notes.md)
+- Validation spans three weeks and has informed model-error and threshold decisions; it is not an untouched final holdout. [Evaluation design](evaluation_notes.md), [backtest notes](backtest_notes.md)
+- Train and validation differ in volatility regime, limiting simple extrapolation of validation findings. [Evaluation design](evaluation_notes.md)
+
+## Project status
+
+**Completed:** local data and feature pipeline; leakage and split checks; settlement-proxy/basis analysis; Stage 0 sigma selection and calibration; fee, spread, and edge-threshold analysis; Tier-2 Stage 0 backtest; logistic comparison; HAR-RV forecast and probability comparison on validation.
+
+**Remaining:** conditional gradient-boosting gate and candidate economic comparison; strategy sizing, risk, and regime analysis; live-data execution validation; one-shot locked test evaluation; live feature generation and paper trading. These are planned work, not completed results.
+
+Last updated: 2026-09-30
+
+## Repository layout and technical records
 
 ```text
 .
-|-- storage.py                 # Shared daily Parquet save/load helpers
-|-- scripts/                   # Backfills, feature builders, checks, and analyses
-|-- data/                      # Generated local datasets and plots (mostly ignored)
-|-- schema.md                  # Dataset schemas and timestamp conventions
-|-- exchange_notes.md          # BTC exchange-selection evidence
-|-- feature_notes.md           # Feature definitions and leakage controls
-`-- quote_notes.md             # Kalshi endpoint, coverage, and execution notes
+├── README.md          Project overview and current findings
+├── ARCHITECTURE.md    Pipeline stages and technical navigation
+├── storage.py         Shared local daily-storage helpers
+├── scripts/           Data, feature, model, check, and analysis code
+├── data/              Mostly local, untracked datasets and derived artifacts
+└── *_notes.md         Chronological technical research records
 ```
 
-## Setup
+| Question | Start here |
+| --- | --- |
+| Pipeline stages and implementation map | [Architecture](ARCHITECTURE.md) |
+| Fields, timestamps, and artifact roles | [Schema](schema.md), [feature-table notes](feature_table_notes.md) |
+| BTC sources, reference price, and basis risk | [Exchange notes](exchange_notes.md), [feature notes](feature_notes.md) |
+| Kalshi quotes and coverage | [Quote notes](quote_notes.md) |
+| Split, locked test, and validation-use rules | [Evaluation notes](evaluation_notes.md) |
+| Stage 0 choice and calibration | [Calibration notes](calibration_notes.md) |
+| Fees, spreads, thresholds, and fill assumptions | [Execution notes](execution_notes.md) |
+| Historical trading results | [Backtest notes](backtest_notes.md) |
+| Logistic and HAR-RV comparisons | [Model notes](model_notes.md) |
 
-Create and activate a virtual environment from the repository root, then install the direct dependencies:
+The technical notes are chronological research records; some headings retain internal development-session labels for provenance.
+
+## Setup and reproducibility
+
+The frozen analysis environment used **Python 3.13.7**; package versions are recorded in [model notes](model_notes.md). `requirements.txt` pins the recorded dependencies. From the repository root:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python3 -m pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
-The data-fetching scripts use public exchange and Kalshi HTTP endpoints. They write into `data/` and may take substantial time to complete. Run scripts from the repository root so local imports resolve consistently.
+Scripts use the module form `python -m scripts.<name>` from the repository root. Public endpoints used by the project require no credentials. Data-fetching and builder scripts write local artifacts, so inspect a script before running it.
 
-## Representative Commands
-
-```bash
-# Fetch settled Kalshi markets and exchange trade data
-python3 -m scripts.fetch_settled_markets
-python3 -m scripts.backfill_bullish
-python3 -m scripts.backfill_kraken
-python3 -m scripts.backfill_crypto_com
-
-# Backfill and validate historical Kalshi quotes
-python3 -m scripts.backfill_kalshi_quotes
-python3 -m scripts.check_kalshi_quotes
-python3 -m scripts.inspect_kalshi_market
-
-# Build and validate volatility features
-python3 -m scripts.build_realized_vol_sample
-python3 -m scripts.check_realized_vol
-python3 -m scripts.check_vol_coverage
-
-# Run the live top-of-book recorder; Ctrl+C flushes buffered observations
-python3 -m scripts.record_kalshi_quotes
-```
-
-Analysis entry points include `python3 -m scripts.analyze_realized_vol`, `python3 -m scripts.basis_risk`, and `python3 -m scripts.analyze_basis_risk`.
-
-## Current Limitations
-
-- No probability model, backtest, or trading system has been implemented yet.
-- Historical Kalshi quotes are top-of-book candles without historical size or full depth.
-- A small number of historical markets have reproducible upstream candle-coverage gaps.
-- Exchange-derived BTC settlement proxies are not the official Kalshi settlement index.
-- Live quote snapshots contain top-of-book size, but not a complete order book.
+A clone makes the code, methods, research records, tracked plots, and selected public metadata inspectable. It does **not** include the research datasets or many derived artifacts. Public data sources are described, but exact historical reconstruction is not guaranteed and is not the purpose of this public repository. Live-recorder snapshots cannot be reproduced retrospectively.

@@ -1,5 +1,8 @@
 # Execution Notes
 
+This chronological note covers fee, spread, threshold, and historical execution assumptions.
+Pipeline stage: trading-cost and candidate-signal design. Return to the [README](README.md) or [architecture map](ARCHITECTURE.md) for navigation; internal session headings are retained for provenance.
+
 ## 1. Fee Schedule
 
 Research retrieved on **2026-09-14** for KXBTC15M and the evaluation period **2026-05-26 through 2026-08-24**, inclusive. Day 10 Section 1.1 only; no fee implementation or evaluation data was used.

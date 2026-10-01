@@ -1,5 +1,8 @@
 # Data Schema
 
+This chronological schema records local data and artifact roles as the pipeline developed.
+Pipeline scope: source data through model and backtest outputs. Return to the [README](README.md) or [architecture map](ARCHITECTURE.md) for navigation; internal session headings are retained for provenance.
+
 Source datasets use daily Parquet files. Timestamps are UTC-aware unless a
 field is explicitly documented as Unix seconds, and daily partitions use UTC
 dates. The derived model-ready table documented below is a single-file

@@ -1,5 +1,8 @@
 # Kalshi Quote Notes
 
+This chronological note covers historical quote acquisition, coverage, and live snapshot observations.
+Pipeline stage: Kalshi quote data. Return to the [README](README.md) or [architecture map](ARCHITECTURE.md) for navigation; internal session headings are retained for provenance.
+
 ## Historical Candlestick Endpoints
 
 KXBTC15M candlesticks are split across two public endpoints:

@@ -1,3 +1,5 @@
+"""Compute reference realized-volatility features from locally stored BTC prices. The functions return features without network access or artifact writes; see feature_notes.md."""
+
 import numpy as np
 import pandas as pd
 

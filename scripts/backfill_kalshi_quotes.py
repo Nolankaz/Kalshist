@@ -1,3 +1,5 @@
+"""Collect historical Kalshi quote data into local daily artifacts. This backfill reads public market responses over the network; see quote_notes.md for the quote-data stage."""
+
 import math
 import time
 from collections import Counter

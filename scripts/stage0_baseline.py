@@ -1,3 +1,5 @@
+"""Score Stage 0 probabilities from the local market feature table and save predictions. This modeling script makes no network requests; see evaluation_notes.md."""
+
 from pathlib import Path
 import math
 import sys

@@ -1,5 +1,8 @@
 # Model-Ready Market Feature Table
 
+This chronological note covers the decision-time feature table, its inputs, and leakage checks.
+Pipeline stage: point-in-time feature construction. Return to the [README](README.md) or [architecture map](ARCHITECTURE.md) for navigation; internal session headings are retained for provenance.
+
 ## Row Definition and Population
 
 The model-ready artifact is `data/features/market_features.parquet`. Each row is

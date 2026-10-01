@@ -1,3 +1,5 @@
+"""Record live Kalshi top-of-book observations in local daily snapshots. The recorder polls public market data over the network; see quote_notes.md for the quote-data stage."""
+
 import math
 import time
 from datetime import datetime, timezone

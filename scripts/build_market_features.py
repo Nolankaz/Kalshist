@@ -1,3 +1,5 @@
+"""Build the model-ready market feature table from locally stored source data. This artifact builder does not make network requests; see feature_table_notes.md."""
+
 from pathlib import Path
 import sys
 

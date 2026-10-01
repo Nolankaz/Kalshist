@@ -1,3 +1,8 @@
+# BTC Exchange and Reference-Price Notes
+
+This chronological note covers BTC exchange data sources and settlement/reference-price assessment.
+Pipeline stage: exchange acquisition and basis-risk analysis. Return to the [README](README.md) or [architecture map](ARCHITECTURE.md) for navigation; internal session headings are retained for provenance.
+
 ## BULLISH
 
 Symbol:

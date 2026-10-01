@@ -1,3 +1,5 @@
+"""Fetch public Crypto.com BTC trades and save local daily price aggregates. This source-data backfill makes network requests; see exchange_notes.md for the acquisition stage."""
+
 import time
 from datetime import date, datetime, timedelta, timezone
 

@@ -1,3 +1,5 @@
+"""Assign chronological evaluation splits to supplied market features. This local helper returns split masks or labels without network access or artifact writes; see evaluation_notes.md."""
+
 from itertools import combinations
 
 import pandas as pd

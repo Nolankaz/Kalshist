@@ -1,3 +1,8 @@
+# Realized-Volatility Feature Notes
+
+This chronological note covers the BTC reference and realized-volatility feature engines and checks.
+Pipeline stage: point-in-time volatility features. Return to the [README](README.md) or [architecture map](ARCHITECTURE.md) for navigation; internal session headings are retained for provenance.
+
 Realized volatility definition:
 
 For a timestamp t and lookback window W:

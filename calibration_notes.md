@@ -1,5 +1,8 @@
 # Day 9 Stage 0 Selection, Calibration, and Basis-Risk Notes
 
+This chronological note covers Stage 0 sigma selection, calibration, and basis sensitivity.
+Pipeline stage: probability selection and calibration. Return to the [README](README.md) or [architecture map](ARCHITECTURE.md) for navigation; the existing session title is retained for provenance.
+
 These notes record the completed Day 9 analysis through Part 3.2. All reported values come from stored Day 9 artifacts and use the established train and validation common populations. No test outcomes are used.
 
 ## 1. Selected Stage 0 sigma

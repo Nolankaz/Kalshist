@@ -1,3 +1,5 @@
+"""Compute batch realized-volatility feature tables from local BTC price data. This engine returns features without network access or artifact writes; see feature_notes.md."""
+
 from pathlib import Path
 import sys
 

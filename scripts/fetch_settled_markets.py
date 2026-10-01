@@ -1,3 +1,5 @@
+"""Fetch settled Kalshi market metadata into local daily source files. This acquisition script makes public API requests; see schema.md for the market-data stage."""
+
 import httpx
 import time
 import pandas as pd

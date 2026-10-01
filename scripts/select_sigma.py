@@ -1,3 +1,5 @@
+"""Select the Stage 0 volatility candidate from saved local scores and predictions. This evaluation script writes a selection artifact without network access; see calibration_notes.md."""
+
 from itertools import product
 from pathlib import Path
 import math

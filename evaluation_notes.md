@@ -1,5 +1,8 @@
 # Evaluation Design
 
+This chronological note records split rules, preregistered evaluation protocols, and permitted validation use.
+Pipeline stage: evaluation design across the models and trading analyses. Return to the [README](README.md) or [architecture map](ARCHITECTURE.md) for navigation; internal session headings are retained for provenance.
+
 ## Chronological Dataset Split
 
 The split key is the stored string column `close_date`, which is the UTC date
